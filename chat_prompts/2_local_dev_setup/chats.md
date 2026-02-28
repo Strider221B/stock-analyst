@@ -152,3 +152,154 @@ With these tasks, you have a rigid, step-by-step checklist to get the base of th
 
 Would you like me to write out the actual code for the `docker-compose.yml` file and the backend `Dockerfile.dev` so you can knock out User Story 1 right away?
 
+## Prompt 2
+
+Let's work towards
+Feature 1: Local Development & Foundation Setup
+
+### User Story 1: Monorepo & Docker Orchestration
+
+**"As a developer, I want a containerized monorepo environment so that I can spin up the entire application stack locally with a single command."**
+
+* **Task 1.3:** Create a `.env.example` file in the root directory containing placeholder variables for POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, and GEMINI_API_KEY.
+
+Can you create this file?
+
+Here is the `.env.example` file to serve as the template for your environment variables.
+
+You should place this at the root of your monorepo. When you or another developer clone the project, you will copy this file, rename the copy to `.env`, and replace the placeholder values with your actual local credentials and API keys.
+
+```env
+# ==========================================
+# PostgreSQL Database Configuration
+# ==========================================
+# These credentials will be used by the Docker container to initialize
+# the local database and by FastAPI to connect to it.
+POSTGRES_USER=local_admin
+POSTGRES_PASSWORD=your_secure_local_password
+POSTGRES_DB=equity_analysis_db
+
+# ==========================================
+# AI Agent Layer
+# ==========================================
+# Obtain your Gemini API key from Google AI Studio (https://aistudio.google.com/)
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# ==========================================
+# Application Settings (Optional but recommended)
+# ==========================================
+# Used by the backend to set CORS origins and by the frontend to proxy requests
+BACKEND_PORT=8000
+FRONTEND_PORT=5173
+
+```
+
+Would you like me to move on to **Task 1.5** and **Task 1.6** next and write the root `docker-compose.yml` file to network these services together?
+
+## Prompt 3
+
+Can you go ahead with task 1.6:
+
+* **Task 1.6:** Define a custom Docker bridge network in `docker-compose.yml` to allow the containers to communicate.
+
+Here is the complete `docker-compose.yml` file. This fulfills both Task 1.5 and Task 1.6 by defining the three core services and explicitly connecting them via a custom bridge network.
+
+This setup ensures your containers can securely resolve each other by their service names (e.g., the backend can reach the database at `db:5432`).
+
+Create a file named `docker-compose.yml` at the root of your monorepo and add the following configuration:
+
+```yaml
+
+services:
+  # ==========================================
+  # Database Service (PostgreSQL)
+  # ==========================================
+  db:
+    image: postgres:18.3-alpine3.23
+    container_name: stock_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  # ==========================================
+  # Backend Service (FastAPI)
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: stock_backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      # Mount local backend directory to /app in container for hot-reloading
+      - ./backend:/app
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  # ==========================================
+  # Frontend Service (React + Vite)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: stock_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      # Mount local frontend directory to /app for HMR (Hot Module Replacement)
+      - ./frontend:/app
+      # Prevent local node_modules from overwriting container's node_modules
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+# ==========================================
+# Task 1.6: Custom Docker Bridge Network
+# ==========================================
+networks:
+  app_network:
+    driver: bridge
+    name: stock_app_network
+
+# ==========================================
+# Persistent Volumes
+# ==========================================
+volumes:
+  postgres_data:
+
+```
+
+### How This Achieves Your Goal
+
+* **Networking (`app_network`):** By defining `app_network` as a `bridge` network at the bottom and attaching all three services to it, Docker's internal DNS allows the containers to discover each other. Notice how the backend's `DATABASE_URL` uses `@db:5432` instead of `localhost`.
+* **Hot-Reloading (`volumes`):** The `./backend:/app` and `./frontend:/app` volume mounts map your local code directly into the running containers. When you save a file on your host machine, Uvicorn and Vite will instantly detect the change and restart/reload.
+* **Environment Injection:** Compose automatically reads the `.env` file in the same directory and passes variables like `POSTGRES_USER` directly into the PostgreSQL and FastAPI containers.
+
+---
+
+Would you like me to write the `Dockerfile.dev` for the FastAPI backend (Tasks 3.12 & 3.13) so the `backend` service in this compose file can successfully build?
+
+## Prompt 4
+
+
