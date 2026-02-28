@@ -268,3 +268,146 @@ While not a standard UML diagram, it is important to map how these components si
 * **On Azure (Test/Prod):** The Docker containers for React and FastAPI are pushed to an Azure Container Registry and hosted on Azure Container Apps. PostgreSQL is hosted on Azure Database for PostgreSQL (Flexible Server). Terraform manages the networking (VNet, subnets) that allows them to communicate securely.
 
 Would you like to move on to defining the specific API endpoints (REST routes and WebSocket channels) between the React frontend and FastAPI backend, or would you prefer to start designing the database schema?
+
+## Prompt 4
+
+Can you create detailed requirements for this project which breaks down the different features, the deliverables for each feature that can be used in the subsequent steps? Make the individual feature requirements detailed enough so that I can take the individual features and start developing.
+
+Here is a detailed breakdown of the requirements and deliverables for each feature. This structure is designed so you can take any individual feature block and immediately begin coding its components.
+
+### Feature 1: Local Development & Foundation Setup
+
+**Goal:** Establish the monorepo structure, initialize the core frameworks, and ensure the entire stack runs seamlessly on a local machine via Docker Compose.
+
+* **Requirements:**
+* Initialize a Vite + React + TypeScript frontend with Tailwind CSS and shadcn/ui.
+* Initialize a FastAPI + Python backend with environment variable management.
+* Set up a local PostgreSQL database instance.
+* Configure Docker Compose to network the frontend, backend, and database together locally with hot-reloading enabled for development.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **Repository** | A standard monorepo folder structure (`/frontend`, `/backend`, `/infrastructure`). |
+| **Docker** | `Dockerfile.dev` for both frontend and backend; a root `docker-compose.yml` file. |
+| **Config Files** | `vite.config.ts` (proxying API requests to backend), `requirements.txt` / `pyproject.toml`, and a local `.env.example`. |
+
+---
+
+### Feature 2: Secure Authentication & Database Modeling
+
+**Goal:** Create a secure user login system and define the foundational database schemas required to support user sessions and portfolio tracking.
+
+* **Requirements:**
+* Implement user registration and login endpoints in FastAPI.
+* Implement JWT-based authentication using **HttpOnly, Secure cookies** to prevent XSS attacks.
+* Design SQLAlchemy models for `Users`, `Portfolios` (capable of differentiating between domestic brokerage accounts and international holdings), and `ChatSessions`.
+* Build the frontend React UI for Login/Registration, utilizing React Context or Zustand to manage the global authentication state.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **Database** | Alembic migration scripts defining the `users`, `portfolios`, and `chat_history` tables. |
+| **API Routes** | `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`. |
+| **Frontend UI** | Authentication pages (`/login`, `/register`) and protected route wrappers in React Router. |
+
+---
+
+### Feature 3: Portfolio & Watchlist Dashboard
+
+**Goal:** Allow users to manage the stocks and domains they want the AI to analyze, providing a clean UI to view their selected assets.
+
+* **Requirements:**
+* Create CRUD endpoints in FastAPI for users to add or remove stock tickers (e.g., adding US-listed tech stocks like GOOGL).
+* Build a React dashboard displaying the user's active watchlist.
+* Integrate a lightweight charting library (like Recharts) to display a basic historical price line graph for selected stocks on the dashboard.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **API Routes** | `GET /api/portfolio`, `POST /api/portfolio/add`, `DELETE /api/portfolio/{ticker}`. |
+| **Frontend UI** | Main Dashboard view (`/dashboard`), a "Stock Card" component, and an "Add Ticker" modal. |
+
+---
+
+### Feature 4: The Agentic AI Core (LangGraph + Gemini)
+
+**Goal:** Build the backend reasoning engine that fetches quantitative data, scrapes qualitative news, and synthesizes a final recommendation.
+
+* **Requirements:**
+* Develop a `yfinance` Python tool to fetch current prices, P/E ratios, and moving averages.
+* Develop a `Playwright` Python tool to scrape the latest headlines and sentiment from financial news sites.
+* Construct a LangGraph `StateGraph` with nodes for: *Fetch Market Data*, *Fetch News*, and *Generate Thesis*.
+* Engineer the Gemini system prompt to output a strict JSON schema containing a "Buy/Hold/Sell" rating, a confidence score (0-100), and a structured thesis (e.g., evaluating the strategic value of reinvesting RSU dividend yields into specific equities).
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **AI Tools** | `tools/finance_data.py` and `tools/news_scraper.py`. |
+| **LangGraph** | `workflows/stock_analysis_graph.py` defining the nodes, edges, and state schema. |
+| **API Route** | `POST /api/analyze/{ticker}` which triggers the LangGraph workflow and returns the JSON result. |
+
+---
+
+### Feature 5: High-Potential Market Scanning
+
+**Goal:** Implement a feature allowing users to search entire sectors or domains for high-potential short-term or long-term gains.
+
+* **Requirements:**
+* Create a backend service that pulls a list of tickers within a user-specified sector.
+* Implement a batch-processing LangGraph workflow that runs lightweight analysis on multiple tickers concurrently.
+* Build a frontend interface where users select a sector from a dropdown and trigger the scan, displaying the top 5 results ranked by Gemini's confidence score.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **API Route** | `POST /api/scan/sector` accepting a domain string and timeframe (short/long). |
+| **Frontend UI** | A "Sector Scan" dedicated page or tab with loading skeletons while the batch process runs. |
+
+---
+
+### Feature 6: Real-Time Sidebar Chat
+
+**Goal:** Provide an interactive sidebar where the user can discuss the current stock analysis with Gemini in real-time.
+
+* **Requirements:**
+* Set up a FastAPI WebSocket endpoint (`/ws/chat/{session_id}`) to handle persistent, bi-directional communication.
+* Configure LangChain/LangGraph memory to inject the context of the currently viewed stock analysis into the chat agent's prompt.
+* Build a persistent React sidebar component that connects to the WebSocket and handles the streaming text chunks from Gemini.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **WebSocket** | `managers/websocket_manager.py` to handle active connections and broadcasting. |
+| **AI Memory** | Integration of PostgreSQL-backed chat history into the Gemini chat node. |
+| **Frontend UI** | A collapsible `<SidebarChat />` component globally accessible across the dashboard. |
+
+---
+
+### Feature 7: Infrastructure as Code & CI/CD
+
+**Goal:** Automate the deployment process to Azure, maintaining strict isolation between the Test and Production environments.
+
+* **Requirements:**
+* Write Terraform configuration files utilizing variables to provision distinct Azure Resource Groups, Azure Container Apps, and Azure Database for PostgreSQL servers.
+* Create a GitHub Actions workflow that builds the Docker images and pushes them to an Azure Container Registry (ACR).
+* Configure the CI/CD pipeline to automatically apply Terraform and deploy to the `Test` environment on merge to `main`, with a manual approval step required to deploy to `Prod`.
+
+
+* **Deliverables:**
+| Component | Deliverable Description |
+| :--- | :--- |
+| **Terraform** | `main.tf`, `variables.tf`, `test.tfvars`, and `prod.tfvars`. |
+| **CI/CD** | `.github/workflows/deploy.yml` defining the build, test-deploy, and prod-deploy jobs. |
+
+---
+
+Would you like me to generate the exact folder structure and the initial `docker-compose.yml` file to get Feature 1 started immediately?
+
+
