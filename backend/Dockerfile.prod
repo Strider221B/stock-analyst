@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim
+
+# 1. Environment variables for Python performance & Playwright
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /app
+
+# 2. Install System Dependencies (Using --no-install-recommends to save space)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. Install Python Dependencies (Using BuildKit cache for speed)
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
+
+# 4. Install Playwright Browsers & OS Dependencies
+# Combining these into one layer saves space
+RUN playwright install chromium && playwright install-deps
+
+# 5. Create a non-privileged user for Security
+# Running as 'root' in production is a security risk
+RUN useradd -m appuser
+USER appuser
+
+# 6. Copy Application Code (Owned by the new user)
+# While similar to
+# COPY . .
+# RUN chown -R appuser:appuser /app
+# But in n Docker, every RUN command creates a new "layer." If your app is 50MB,
+# the COPY adds 50MB, and the RUN chown adds another 50MB to the image
+# size because Docker has to "save" the new ownership state of those files.
+COPY --chown=appuser:appuser . .
+
+EXPOSE 8000
+
+# 7. Use 'exec' form for CMD to handle signals properly
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

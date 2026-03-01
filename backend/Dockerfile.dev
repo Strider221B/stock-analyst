@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 1. Install System Dependencies First (Changes Rarely)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Use Cache Mount for Pip (Speeds up dependency changes)
+# To use the --mount syntax, ensure you have BuildKit enabled.
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+
+# 3. Setup Playwright (Fixed version to avoid re-downloads)
+# Use a specific path so browsers are easy to find and cache
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install chromium && playwright install-deps
+
+# 4. Copy Source Code Last (Changes most frequently)
+# This prevents code edits from triggering pip installs or browser downloads
+COPY . .
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

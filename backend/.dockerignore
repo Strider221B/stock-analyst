@@ -1,0 +1,44 @@
+# --- Dependencies & Build Artifacts ---
+node_modules
+dist
+build
+bin
+obj
+out
+.npm
+.cache
+.vite
+.next
+
+# --- Python specifics ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.pytest_cache/
+
+# --- Environment & Secrets ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# --- Docker & Git ---
+.git
+.gitignore
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# --- Local IDE & OS garbage ---
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.sqlite3
+
+# Docker-related files
+Dockerfile.dev
+Dockerfile.prod

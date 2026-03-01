@@ -1,0 +1,39 @@
+# Stage 1: Build the React application
+FROM node:25.7.0-alpine3.22 AS builder
+
+WORKDIR /app
+
+# 1. Cache npm dependencies
+# We use a cache mount so that npm doesn't re-download packages if package.json hasn't changed
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm clean-install
+
+# 2. Copy source and build
+# Moving this after npm install ensures code changes don't trigger a re-install
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+# Different version of alpine could have been an issue if we were copying over compiled
+# code. Since are copying static files, this is not a concern. Docker starts fresh with
+# every from statement.
+FROM nginx:1.29.5-alpine3.23
+
+# 3. Security: Run Nginx as a non-root user (Best Practice)
+# Standard Nginx images run as root; this is a safer alternative
+RUN touch /var/run/nginx.pid && \
+    chown -R nginx:nginx /var/run/nginx.pid /var/cache/nginx /var/log/nginx /etc/nginx/conf.d
+
+USER nginx
+
+# 4. Clean and Copy static assets
+RUN rm -rf /usr/share/nginx/html/*
+COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
+
+# 5. Copy custom Nginx config
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080
+
+CMD ["nginx", "-g", "daemon off;"]

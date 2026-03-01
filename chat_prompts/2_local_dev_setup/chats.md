@@ -879,3 +879,86 @@ By doing this, data is guaranteed to pass back and forth across the Nginx proxy 
 
 Would you like to move forward and map out the complete backend `main.py` file to get the FastAPI server initialized, or should we draft the full `websocket_manager.py` file now that the ping/pong logic is defined?
 
+## Prompt 8
+
+where will I add dockerignore?
+
+You will need to create **two separate `.dockerignore` files**, placing one inside the `/frontend` directory and one inside the `/backend` directory.
+
+Because your `docker-compose.yml` file specifies different build contexts for each service (`context: ./frontend` and `context: ./backend`), the Docker engine looks for the `.dockerignore` file at the root of each specific context, not at the root of your entire monorepo.
+
+This is critical for performance. Without these files, Docker will attempt to copy your massive local `node_modules` or Python virtual environments to the Docker daemon before building the images, which takes forever and inflates your image size.
+
+Here is exactly what should go in each file.
+
+### 1. Frontend `.dockerignore`
+
+Create a file named `.dockerignore` inside the `/frontend` directory.
+
+```text
+# Dependency directories
+node_modules/
+npm-debug.log
+
+# Build outputs
+dist/
+build/
+
+# Environment variables (Keep secrets out of the image)
+.env
+.env.local
+.env.*
+
+# Git and OS files
+.git/
+.DS_Store
+Thumbs.db
+
+# Docker-related files (no need to copy the Dockerfiles into the image)
+Dockerfile.dev
+Dockerfile.prod
+
+```
+
+### 2. Backend `.dockerignore`
+
+Create a file named `.dockerignore` inside the `/backend` directory.
+
+```text
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+
+# Git and OS files
+.git/
+.DS_Store
+Thumbs.db
+
+# Database files (if you accidentally use SQLite locally instead of Postgres)
+*.sqlite3
+
+# Docker-related files
+Dockerfile.dev
+Dockerfile.prod
+
+```
+
+### Why this matters for your specific setup:
+
+In your `Dockerfile.prod` for the frontend, you have the line `COPY . .`. If `node_modules/` wasn't in your `.dockerignore`, Docker would copy your entire local `node_modules` folder into the container, overwriting the clean Linux dependencies installed by `RUN npm install` just a step prior, which often breaks the build entirely.
+
+---
+
+With your Docker orchestration, reverse proxies, and ignore files fully established, your infrastructure foundation is rock solid.
+
+Would you like to move into **User Story 3** and start writing the `/backend/main.py` file to initialize the FastAPI app and connect it to your PostgreSQL database?
+

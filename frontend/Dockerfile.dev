@@ -1,0 +1,15 @@
+FROM node:25.7.0-alpine3.22
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
+
+# The rest of the code is mounted via docker-compose volumes,
+# so we do not need to COPY it here.
+
+# Start the Vite development server, binding to all network interfaces
+# The -- in front of --host tells npm to stop considering host and beyond as it's params
+# but pass it to vite
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
