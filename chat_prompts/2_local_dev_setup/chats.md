@@ -302,4 +302,580 @@ Would you like me to write the `Dockerfile.dev` for the FastAPI backend (Tasks 3
 
 ## Prompt 4
 
+Can you create two versions of this docker-compose.yml, one for local development and the other for production?
+
+Here are the two distinct versions of your Docker Compose files.
+
+It is an excellent practice to maintain both. Even though your final Production environment will be orchestrated by Terraform on Azure Container Apps, having a `docker-compose.prod.yml` allows you to test your highly optimized, compiled production containers locally before you ever push them to the cloud.
+
+### 1. Local Development (`docker-compose.yml`)
+
+This is optimized for the **developer experience**. It uses your `Dockerfile.dev` files, runs hot-reloading servers (Vite and Uvicorn), and uses volume mounts so that every time you save a file on your computer, the changes instantly reflect in the running container.
+
+```yaml
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: stock_db_dev
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: stock_backend_dev
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      # LIVE RELOAD: Mounts your local code into the container
+      - ./backend:/app
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: stock_frontend_dev
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    volumes:
+      # LIVE RELOAD: Mounts your local React code
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:
+
+```
+
+---
+
+### 2. Production Build Test (`docker-compose.prod.yml`)
+
+This is optimized for **performance and security**. It builds using your `Dockerfile.prod` files. Notice that the `volumes` mapping your local code are **gone**. Instead, the code is permanently copied and compiled ("baked") into the images. The frontend is served by a high-performance Nginx web server rather than the Vite development server.
+
+```yaml
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: stock_db_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Uses a separate volume to avoid corrupting dev data
+      - postgres_data_prod:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: stock_backend_prod
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # Set to production mode
+      - ENVIRONMENT=production
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: stock_frontend_prod
+    restart: always
+    ports:
+      # Nginx typically serves on port 80
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data_prod:
+
+```
+
+### Key Differences to Note:
+
+1. **No Live Code Volumes in Prod:** In `docker-compose.prod.yml`, we removed the `./backend:/app` and `./frontend:/app` volumes. Production containers must be immutable. If you change a line of code, you must rebuild the image.
+2. **Separate Database Volumes:** I named the volumes `postgres_data_dev` and `postgres_data_prod`. This ensures that if you spin up the production test locally, it doesn't accidentally overwrite or conflict with the dummy data you are using for daily development.
+3. **Frontend Port:** The production frontend exposes port `80` instead of `5173`, mimicking how standard web traffic will hit your Nginx server.
+
+To run the production version locally to test your finalized build, you would use this command:
+`docker compose -f docker-compose.prod.yml up --build`
+
+---
+
+To make both of these files work, you will need the actual Dockerfiles. Would you like me to write the `Dockerfile.dev` and `Dockerfile.prod` for your FastAPI backend next?
+
+## Prompt 5
+
+Can you make the docker-compse prod yaml to have the reverse proxy method? And make the corresponding change to dev docker compose yml if required
+
+This is the perfect architectural choice. Moving to a reverse proxy setup drastically improves security by keeping your backend entirely inside the private Docker network, and it completely eliminates CORS (Cross-Origin Resource Sharing) configuration headaches.
+
+Here is how we adjust both environments.
+
+### 1. Production Build Test (`docker-compose.prod.yml`)
+
+In this file, the backend port is completely removed. Nginx is the only service exposed to the host machine.
+
+```yaml
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: stock_db_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: stock_backend_prod
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ENVIRONMENT=production
+    # REMOVED: ports mapping. The backend is now fully private.
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: stock_frontend_prod
+    restart: always
+    ports:
+      # ONLY the frontend is exposed to the outside world
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data_prod:
+
+```
+
+### 2. Local Development (`docker-compose.yml`)
+
+For local development, we actually use **Vite's built-in development server** as our reverse proxy instead of Nginx. We configure Vite (via `vite.config.ts`) to intercept any request starting with `/api` and forward it to `http://backend:8000` inside the Docker network.
+
+Because of this, your React app does *not* need the backend port exposed to the host. However, I highly recommend leaving `8000:8000` open in your dev environment for a different reason: **Developer Convenience**. Leaving it open allows you to easily access FastAPI's built-in Swagger documentation (`http://localhost:8000/docs`) and hit the API directly with tools like Postman while you write code.
+
+Here is the updated dev file:
+
+```yaml
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: stock_db_dev
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: stock_backend_dev
+    restart: unless-stopped
+    ports:
+      # KEPT FOR DEV ONLY: Allows you to view Swagger UI at localhost:8000/docs
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: stock_frontend_dev
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      # React will call itself (localhost:5173) and Vite will proxy to the backend
+      - VITE_API_URL=/
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:
+
+```
+
+---
+
+### The Missing Piece: Nginx Configuration
+
+Because your production frontend container is now responsible for routing API traffic to the backend, it needs an `nginx.conf` file to know how to do that.
+
+Would you like me to write the `nginx.conf` routing file and the `Dockerfile.prod` for the frontend to package it all together?
+
+## Prompt 6
+
+Can you go ahead and write the nginx.conf routing file and the Dockerfile.prod, Dockerfile.dev
+
+Here are the necessary Dockerfiles for both your frontend and backend, along with the Nginx configuration file.
+
+This completes the containerization setup for both your local development workflow and your production build.
+
+### 1. Frontend Files (React + Vite)
+
+Place these three files inside your `/frontend` directory.
+
+**`frontend/nginx.conf`**
+This file tells the production Nginx server how to serve your React app, handle client-side routing, forward API requests, and upgrade the connection for your real-time Gemini chat WebSockets.
+
+```nginx
+server {
+    listen 80;
+    server_name localhost;
+
+    # Serve the React application
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        # Required for React Router to handle client-side navigation
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Reverse Proxy for REST API requests
+    location /api/ {
+        proxy_pass http://backend:8000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Reverse Proxy for WebSocket connections (Feature 6)
+    location /ws/ {
+        proxy_pass http://backend:8000/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400; # Keep WebSocket alive
+    }
+}
+
+```
+
+**`frontend/Dockerfile.dev`**
+Optimized for local development with Hot Module Replacement (HMR).
+
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
+
+# The rest of the code is mounted via docker-compose volumes,
+# so we do not need to COPY it here.
+
+# Start the Vite development server, binding to all network interfaces
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+```
+
+**`frontend/Dockerfile.prod`**
+Uses a multi-stage build. It first compiles the React code into static files, then discards the heavy Node.js environment and places the static files into a lightweight Nginx web server.
+
+```dockerfile
+# Stage 1: Build the React application
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+
+# Copy all source code and build
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve with Nginx
+FROM nginx:alpine
+
+# Remove default Nginx static assets
+RUN rm -rf /usr/share/nginx/html/*
+
+# Copy static assets from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy our custom reverse proxy configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+
+```
+
+---
+
+### 2. Backend Files (FastAPI + Python)
+
+Place these two files inside your `/backend` directory.
+
+**`backend/Dockerfile.dev`**
+Optimized for development, running Uvicorn with the `--reload` flag so your server updates instantly when you save Python files.
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies required for psycopg2 or Playwright
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Playwright installation for the news scraper tool
+RUN playwright install chromium
+RUN playwright install-deps
+
+# Start Uvicorn with hot-reloading
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+```
+
+**`backend/Dockerfile.prod`**
+Optimized for production, copying all code into the container and dropping the reload flag for better performance.
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Playwright installation
+RUN playwright install chromium
+RUN playwright install-deps
+
+# Copy the actual application code
+COPY . .
+
+# Expose the internal port (Nginx will proxy to this)
+EXPOSE 8000
+
+# Start Uvicorn without hot-reloading
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+```
+
+---
+
+You now have the complete foundational infrastructure to build, run, and test your application locally.
+
+Would you like me to map out the foundational code for the `/backend/main.py` and the database connection logic using SQLAlchemy, or would you prefer to start generating the React components for the frontend?
+
+
+## Prompt 7
+
+Can you reduce the proxy_read_timeout to 10 mins, we will need to implement "Heartbeats" (Pings). Have the server or client send a small "ping" message every 30–50 seconds instead.
+
+This is an incredibly smart architectural adjustment. Relying on an infinite Nginx timeout (`86400s`) is a well-known anti-pattern because if a client silently drops off the network (like a mobile phone going through a tunnel), the server has no idea and keeps the ghost connection alive, leaking memory.
+
+Implementing an application-level "Heartbeat" (Ping/Pong) ensures dead connections are pruned while active ones stay alive.
+
+Here is how we update the Nginx configuration and implement the heartbeat mechanism across your frontend and backend.
+
+### 1. Updated `nginx.conf` (Frontend)
+
+We will reduce the `proxy_read_timeout` to 10 minutes (600 seconds). If Nginx doesn't see any data pass through the socket for 10 minutes, it will automatically cleanly sever the connection.
+
+```nginx
+    # Reverse Proxy for WebSocket connections (Feature 6)
+    location /ws/ {
+        proxy_pass http://backend:8000/ws/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # Reduced to 10 minutes. Requires application-level heartbeats.
+        proxy_read_timeout 600s;
+    }
+
+```
+
+### 2. The Client-Side Heartbeat (React / Zustand)
+
+The easiest and most reliable way to handle this is to make the frontend the "pinger". When the WebSocket opens, we start a Javascript interval that sends a tiny JSON payload every 30 seconds. When the socket closes, we clear the interval.
+
+Here is how you inject that into your `chatStore.ts`:
+
+```typescript
+let pingInterval: NodeJS.Timeout;
+
+const connectWebSocket = (sessionId: string) => {
+  const socket = new WebSocket(`${import.meta.env.VITE_WS_URL}/ws/chat/${sessionId}`);
+
+  socket.onopen = () => {
+    console.log("WebSocket Connected");
+
+    // START THE HEARTBEAT
+    // Sends a ping every 30 seconds (30000 ms) to keep Nginx routing alive
+    pingInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 30000);
+  };
+
+  socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    // Ignore pong responses; they just keep the connection alive
+    if (data.type === "pong") return;
+
+    // ... handle ai_chunk and ai_complete logic here ...
+  };
+
+  socket.onclose = () => {
+    console.log("WebSocket Disconnected");
+    // STOP THE HEARTBEAT to prevent memory leaks
+    clearInterval(pingInterval);
+  };
+};
+
+```
+
+### 3. The Server-Side Response (FastAPI)
+
+Now that the frontend is pinging, your backend `while True:` loop needs to catch that specific message type and reply immediately so that data flows through Nginx, resetting the 10-minute timeout clock.
+
+Here is how you update your FastAPI route logic:
+
+```python
+@router.websocket("/ws/chat/{session_id}")
+async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
+    await manager.connect(websocket, session_id)
+    try:
+        while True:
+            # Wait for incoming messages from React
+            data = await websocket.receive_json()
+
+            # HANDLE HEARTBEAT
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue # Skip the rest of the loop, do not trigger Gemini
+
+            # HANDLE ACTUAL CHAT MESSAGES
+            if data.get("type") == "user_message":
+                user_text = data.get("content")
+                # ... trigger LangGraph/Gemini streaming workflow here ...
+
+    except WebSocketDisconnect:
+        manager.disconnect(session_id)
+
+```
+
+By doing this, data is guaranteed to pass back and forth across the Nginx proxy every 30 seconds, preventing the `600s` timeout from ever triggering while the user is actively viewing the page.
+
+Would you like to move forward and map out the complete backend `main.py` file to get the FastAPI server initialized, or should we draft the full `websocket_manager.py` file now that the ping/pong logic is defined?
 
