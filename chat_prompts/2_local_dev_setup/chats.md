@@ -962,3 +962,468 @@ With your Docker orchestration, reverse proxies, and ignore files fully establis
 
 Would you like to move into **User Story 3** and start writing the `/backend/main.py` file to initialize the FastAPI app and connect it to your PostgreSQL database?
 
+## Prompt 9
+
+For:
+Feature 1: Local Development & Foundation Setup
+**"As a developer, I want a containerized FastAPI backend with hot-reloading and my database schemas defined so that I can begin building API routes."**
+**Task 3.2:** Create a `main.py` file in `/backend` and initialize a basic FastAPI app instance.
+
+Can you go ahead and create this file?
+
+Here is the foundational `main.py` file to initialize your FastAPI backend.
+
+Create this file at `/backend/main.py`. I have included the CORS (Cross-Origin Resource Sharing) middleware configuration. Even though your Nginx/Vite reverse proxy setup handles the routing, setting `allow_credentials=True` here is an absolute necessity for Feature 2, where we will pass secure `HttpOnly` JWT cookies between the frontend and backend.
+
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+# Initialize the FastAPI application
+app = FastAPI(
+    title="Stock Analysis AI API",
+    description="Backend API for AI-driven stock analysis, portfolio management, and real-time Gemini chat.",
+    version="1.0.0",
+    docs_url="/docs", # Available at localhost:8000/docs
+    redoc_url="/redoc"
+)
+
+# ==========================================
+# CORS Configuration
+# ==========================================
+# Defines which origins are allowed to make cross-origin requests.
+# 'allow_credentials=True' is strictly required for accepting HttpOnly cookies.
+origins = [
+    "http://localhost:5173",  # Local Vite development server
+    "http://localhost",       # Production Nginx proxy (local test)
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ==========================================
+# Base Routes
+# ==========================================
+@app.get("/api/health", tags=["System"])
+async def health_check():
+    """
+    A simple health check endpoint to verify the server is running.
+    Useful for Docker Compose depends_on conditions and Azure health probes.
+    """
+    return {
+        "status": "healthy",
+        "message": "Stock Analysis API is up and running."
+    }
+
+# ==========================================
+# Future Router Inclusions (Placeholders)
+# ==========================================
+# As we build out the features, we will import and attach the routers here:
+# from routes import auth, portfolios, analysis, chat
+#
+# app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+# app.include_router(portfolios.router, prefix="/api/portfolios", tags=["Portfolios"])
+# app.include_router(analysis.router, prefix="/api", tags=["Analysis & Scanning"])
+# app.include_router(chat.router, prefix="/ws", tags=["Real-time Chat"])
+
+```
+
+### What this achieves:
+
+1. **The Instance:** It creates the core `app` object that Uvicorn will look for when the Docker container starts (`uvicorn main:app`).
+2. **Health Probe:** The `/api/health` route gives you a fast way to verify your Docker setup is working. Once your container is running, you can visit `http://localhost:8000/api/health` in your browser.
+3. **Prepared for Scaling:** The placeholder section at the bottom shows exactly how we will snap in the modular route files (auth, portfolios, etc.) as we build them, keeping this main file clean and organized.
+
+---
+
+Would you like me to move directly to **Tasks 3.3 through 3.8** and write the `models.py` file to define your SQLAlchemy database tables (Users, Portfolios, Chat History)?
+
+## Prompt 10
+
+Can you OOPs and SOLID principles for all code files? How to write this in object oriented way?
+
+This is a fantastic request. Moving from procedural scripts to an OOP and SOLID architecture is exactly what separates a quick prototype from a resilient, enterprise-grade application.
+
+While FastAPI leans heavily on functional decorators for its routing layer (`@app.get()`), the underlying business logic, database access, and external API calls should absolutely be structured using Object-Oriented principles.
+
+To do this, we will implement the **Repository Pattern** and the **Service Layer Pattern**. This heavily utilizes Dependency Injection (the "D" in SOLID) so that your routes never talk directly to the database or external tools.
+
+Here is how we apply SOLID to your Python backend, starting by refactoring the `main.py` file into an App Factory pattern, and then looking at the architecture for your features.
+
+### 1. Refactoring `main.py` (Object-Oriented App Factory)
+
+Instead of declaring variables loosely in the global scope, we can encapsulate the creation and configuration of the FastAPI application inside a class. This adheres to the **Single Responsibility Principle (SRP)**—the class has one job: configuring the app.
+
+```python
+# /backend/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+class AppCreator:
+    """
+    Encapsulates the creation and configuration of the FastAPI application.
+    Adheres to SRP by centralizing app setup logic.
+    """
+    def __init__(self):
+        self.app = FastAPI(
+            title="Stock Analysis AI API",
+            description="Backend API utilizing OOP and SOLID principles.",
+            version="1.0.0",
+        )
+        self._configure_cors()
+        self._configure_routes()
+
+    def _configure_cors(self):
+        origins = [
+            "http://localhost:5173",
+            "http://localhost",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1"
+        ]
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    def _configure_routes(self):
+        @self.app.get("/api/health", tags=["System"])
+        async def health_check():
+            return {"status": "healthy"}
+
+        # Future route inclusions will go here:
+        # self.app.include_router(auth_router)
+
+    def get_app(self) -> FastAPI:
+        return self.app
+
+# Instantiate the class and expose the app object for Uvicorn
+app_creator = AppCreator()
+app = app_creator.get_app()
+
+```
+
+### 2. How We Will Apply SOLID to the Rest of the App
+
+To make your code object-oriented, we will divide your folders into distinct layers. Here is how the SOLID principles will govern them:
+
+#### A. The Data Access Layer (Repository Pattern)
+
+**Principles Applied:** Single Responsibility (SRP), Dependency Inversion (DIP).
+Instead of writing SQL queries inside your API routes, we create classes dedicated entirely to database interactions.
+
+```python
+# Example: /backend/repositories/user_repository.py
+from sqlalchemy.orm import Session
+from models import User
+
+class UserRepository:
+    def __init__(self, db_session: Session):
+        self.db = db_session
+
+    def get_by_email(self, email: str) -> User | None:
+        return self.db.query(User).filter(User.email == email).first()
+
+    def create(self, user: User) -> User:
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+```
+
+#### B. The External Tools Layer (Abstract Base Classes)
+
+**Principles Applied:** Open/Closed Principle (OCP), Liskov Substitution Principle (LSP).
+You mentioned using `yfinance`. What if Yahoo Finance blocks your IP in the future and you need to switch to Alpha Vantage? If your code is tightly coupled to `yfinance`, it will break. We fix this with interfaces (Abstract Base Classes in Python).
+
+```python
+# Example: /backend/tools/market_data.py
+from abc import ABC, abstractmethod
+
+# The Interface (Abstraction)
+class MarketDataSource(ABC):
+    @abstractmethod
+    def get_current_price(self, ticker: str) -> float:
+        pass
+
+# The Concrete Implementation
+class YFinanceClient(MarketDataSource):
+    def get_current_price(self, ticker: str) -> float:
+        # yfinance specific logic here
+        return 150.00
+
+```
+
+#### C. The Business Logic Layer (Service Pattern)
+
+**Principles Applied:** Interface Segregation (ISP).
+Services handle the "thinking." They take data from the Repository, process it (like sending it to LangGraph), and hand it back.
+
+```python
+# Example: /backend/services/analysis_service.py
+class StockAnalysisService:
+    # Dependency Injection: The service doesn't care WHERE the data comes from,
+    # as long as it adheres to the MarketDataSource interface.
+    def __init__(self, market_client: MarketDataSource):
+        self.market_client = market_client
+
+    def generate_report(self, ticker: str):
+        price = self.market_client.get_current_price(ticker)
+        # pass price to LangGraph...
+        return {"ticker": ticker, "price": price}
+
+```
+
+#### D. The API Routing Layer (Controllers)
+
+**Principles Applied:** Dependency Inversion (DIP).
+FastAPI uses the `Depends()` function to inject these objects into your routes dynamically. The route itself knows nothing about how the database works; it just calls the Service.
+
+```python
+# Example of how a route looks using OOP and Dependency Injection
+@router.post("/analyze/{ticker}")
+async def analyze_stock(
+    ticker: str,
+    # Injecting the dependencies!
+    service: StockAnalysisService = Depends(get_analysis_service)
+):
+    return service.generate_report(ticker)
+
+```
+
+---
+
+By structuring the application this way, every single file has exactly one job. If you want to change how the database saves chat history, you only touch the `ChatRepository`. If you want to change the Gemini prompt, you only touch the `LangGraphService`.
+
+Would you like to proceed with **Task 3.3 through 3.8** by defining your SQLAlchemy database tables (`models.py`), applying the OOP mixin pattern so we don't repeat common columns like `id` and `created_at` across every table?
+
+## Prompt 11
+
+can we read the port numbers from env files?
+
+Yes, absolutely. Hardcoding configuration values like port numbers, database credentials, or API keys is a strict anti-pattern.
+
+In the Python and FastAPI ecosystem, the most robust, Object-Oriented way to handle `.env` files is by using **Pydantic Settings**. It doesn't just read the environment variables; it validates their data types (e.g., ensuring your port is actually an integer) and injects them safely throughout your application.
+
+Here is how we integrate this into your architecture.
+
+### 1. The Configuration Class (`config.py`)
+
+First, you need to install the package: `pip install pydantic-settings`.
+
+Then, we create a dedicated configuration class. This acts as a single source of truth for your entire application's environment variables.
+
+Create a file at `/backend/config.py`:
+
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    """
+    Application configuration loaded from environment variables.
+    Pydantic automatically reads the .env file and validates the types.
+    """
+    # Application Config
+    environment: str = "development"
+    backend_port: int = 8000  # Default to 8000 if not found in .env
+    frontend_port: int = 5173
+
+    # Database Config
+    postgres_user: str
+    postgres_password: str
+    postgres_db: str
+    database_url: str | None = None
+
+    # AI Config
+    gemini_api_key: str
+
+    # Read from the local .env file
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    def get_database_url(self) -> str:
+        """Construct the DB URL if it wasn't explicitly provided."""
+        if self.database_url:
+            return self.database_url
+        return f"postgresql://{self.postgres_user}:{self.postgres_password}@db:5432/{self.postgres_db}"
+
+# Instantiate as a singleton so it is loaded into memory exactly once
+settings = Settings()
+
+```
+
+### 2. Updating `main.py` to Use the Dynamic Port
+
+Now, we bring this into your `main.py` file. If you run the Python script directly, it will read the port from the `.env` file and spin up Uvicorn dynamically.
+
+```python
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from config import settings  # Import the validated settings
+
+class AppCreator:
+    def __init__(self):
+        self.app = FastAPI(
+            title="Stock Analysis AI API",
+            # We can even use the env variables to dictate the app configuration
+            docs_url="/docs" if settings.environment == "development" else None,
+        )
+        self._configure_cors()
+        self._configure_routes()
+
+    def _configure_cors(self):
+        # Dynamically constructing allowed origins based on the env ports
+        origins = [
+            f"http://localhost:{settings.frontend_port}",
+            "http://127.0.0.1",
+            "http://localhost"
+        ]
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    def _configure_routes(self):
+        @self.app.get("/api/health", tags=["System"])
+        async def health_check():
+            return {"status": "healthy", "environment": settings.environment}
+
+    def get_app(self) -> FastAPI:
+        return self.app
+
+app_creator = AppCreator()
+app = app_creator.get_app()
+
+# Read the port directly from the settings class!
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=settings.backend_port,
+        reload=(settings.environment == "development")
+    )
+
+```
+
+### 3. Updating the Dockerfile
+
+Previously, the `Dockerfile.dev` had the port hardcoded in the `CMD` array. To let the Python script handle the port assignment dynamically based on your `.env` file, change the final line of your `/backend/Dockerfile.dev` to execute the Python script instead of the Uvicorn CLI:
+
+```dockerfile
+# Change this:
+# CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# To this:
+CMD ["python", "main.py"]
+
+```
+
+By making this change, Docker starts the container, executes `main.py`, the `Settings` class reads your `.env` file, grabs the `BACKEND_PORT` variable, ensures it is a valid integer, and starts the server on that exact port.
+
+---
+
+Would you like me to map out the `models.py` file next, using the exact same Object-Oriented Mixin pattern to define your `users`, `portfolios`, and `chat_messages` tables?
+
+## Prompt 12
+
+Using allow_methods=["*"] and allow_headers=["*"] are these security vulnerability, how to fix?
+
+You have an excellent eye for security. Yes, using `allow_methods=["*"]` and `allow_headers=["*"]` is considered a security misconfiguration, especially in an enterprise-grade application, and *especially* when you are also using `allow_credentials=True`.
+
+Here is a breakdown of why this is dangerous and exactly how we will fix it using our Object-Oriented constants.
+
+### Why `["*"]` is a Security Risk
+
+When you use the wildcard `*`, you are telling the browser: *"I trust the allowed origins to send absolutely any type of HTTP request with any custom header they want."*
+
+1. **The Risk with `allow_methods=["*"]`:** If you only intend for an endpoint to accept `GET` and `POST` requests, but you allow `*`, an attacker who compromises an allowed origin (e.g., via a Cross-Site Scripting or XSS attack on your frontend) could forge `DELETE` or `PUT` requests to wipe out a user's portfolio or chat history.
+2. **The Risk with `allow_headers=["*"]`:**
+Modern web security relies heavily on custom headers (like CSRF tokens or specific authorization schemes). Allowing any header opens the door for attackers to probe your API with malformed or malicious headers, potentially bypassing web application firewalls (WAFs) or exploiting backend header-parsing vulnerabilities.
+3. **The `allow_credentials` Multiplier:**
+Because we must set `allow_credentials=True` to accept your secure `HttpOnly` JWT cookies, the stakes are much higher. If an attacker exploits the wildcards, they are doing so *fully authenticated* as the victim.
+
+---
+
+### How to Fix It (The Principle of Least Privilege)
+
+To fix this, we apply the **Principle of Least Privilege**. We must explicitly define exactly which methods and headers our React frontend is allowed to use—and block everything else.
+
+#### Step 1: Update `constants.py`
+
+To keep our code clean and SOLID, we will define these allowed lists in our centralized constants file. Add this new class to your `/backend/constants.py`:
+
+```python
+class CORSConfig:
+    """Explicitly defined CORS rules to prevent overly permissive wildcards."""
+
+    # We allow OPTIONS because browsers use it for CORS "preflight" checks
+    ALLOWED_METHODS = [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "OPTIONS"
+    ]
+
+    # Only allow standard safe headers and the specific headers React needs
+    ALLOWED_HEADERS = [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With"
+    ]
+
+```
+
+#### Step 2: Update the App Factory in `main.py`
+
+Now, we inject these strict constants into the CORS middleware configuration.
+
+```python
+# /backend/main.py (Snippet)
+from constants import Environment, AppConfig, APITags, CORSConfig
+
+class AppCreator:
+    # ... (__init__ remains the same) ...
+
+    def _configure_cors(self):
+        origins = [
+            f"http://localhost:{settings.frontend_port}",
+            "http://127.0.0.1",
+            "http://localhost"
+        ]
+
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+
+            # FIX: Replaced ["*"] with explicitly defined constants
+            allow_methods=CORSConfig.ALLOWED_METHODS,
+            allow_headers=CORSConfig.ALLOWED_HEADERS,
+        )
+
+```
+
+By making this change, if a malicious script tries to send a weird HTTP method (like `TRACE` or `PATCH` if we don't use it) or a custom sneaky header, the browser and FastAPI will immediately block the request before it ever reaches your business logic.
+
+Would you like to move on to defining the database schema in `models.py` next, utilizing our Object-Oriented mixins and Enums?
+
