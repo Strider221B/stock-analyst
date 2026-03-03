@@ -1427,3 +1427,120 @@ By making this change, if a malicious script tries to send a weird HTTP method (
 
 Would you like to move on to defining the database schema in `models.py` next, utilizing our Object-Oriented mixins and Enums?
 
+## Prompt 13
+
+Lets go to next task:
+
+Feature 1: Local Development & Foundation Setup
+As a developer, I want a containerized FastAPI backend with hot-reloading and my database schemas defined so that I can begin building API routes.
+**Task 3.3:** Create a `/backend/models.py` file and initialize the SQLAlchemy declarative base.
+
+To execute Task 3.3 properly while maintaining our strict adherence to SOLID principles and Object-Oriented Programming (OOP), we are going to use **SQLAlchemy 2.0** syntax and implement **Mixins**.
+
+A "Mixin" is an OOP design pattern that allows us to define common attributes (like an `id`, `created_at`, or `updated_at`) exactly once, and then inherit them across all our database models. This enforces the **DRY (Don't Repeat Yourself)** principle.
+
+To keep the Single Responsibility Principle (SRP) intact, we should actually split this into two small files:
+
+1. `database.py`: Responsible *only* for managing the connection to PostgreSQL.
+2. `models.py`: Responsible *only* for defining the database structure.
+
+### 1. The Database Connection (`database.py`)
+
+Create a file at `/backend/database.py`. This uses the `settings` class we created earlier to securely connect to the database.
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from config import settings
+
+# Create the SQLAlchemy Engine
+# This manages the actual connection pool to the PostgreSQL container
+engine = create_engine(
+    settings.get_database_url(),
+    # pool_pre_ping ensures connections aren't stale before using them
+    pool_pre_ping=True
+)
+
+# Create a SessionLocal class
+# Each instance of this class will be a distinct database session
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    """
+    Dependency Injection for database sessions.
+    This ensures a database connection is opened when a request starts
+    and securely closed when the request finishes.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+```
+
+### 2. The Declarative Base & Mixins (`models.py`)
+
+Now, create `/backend/models.py`. Here, we initialize the declarative base and create our reusable OOP Mixin classes.
+
+```python
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import DateTime
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# ==========================================
+# The Declarative Base
+# ==========================================
+class Base(DeclarativeBase):
+    """
+    The master class that all SQLAlchemy models will inherit from.
+    SQLAlchemy's metadata catalog is attached to this class.
+    """
+    pass
+
+# ==========================================
+# Object-Oriented Mixins
+# ==========================================
+class IDMixin:
+    """
+    Provides a standardized UUID primary key for tables.
+    Using UUIDs instead of auto-incrementing integers prevents attackers
+    from guessing database sizes or user IDs (IDOR vulnerabilities).
+    """
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        index=True
+    )
+
+class TimestampMixin:
+    """
+    Provides standardized audit timestamps for tables.
+    Automatically records when a row is created and updated.
+    """
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+```
+
+### Why this architecture matters:
+
+Notice how we used `Mapped` and `mapped_column`? This is the modern **SQLAlchemy 2.0** syntax. It provides absolute type safety. If you try to save a regular string into an `id` field, your code editor (like VS Code) and Python will immediately flag it as a type error before the code even runs.
+
+---
+
+With the Base and Mixins initialized, we are ready to rapidly build out the actual database tables.
+
+Would you like me to tackle **Tasks 3.4 through 3.8** simultaneously, providing the complete code for the `User`, `Portfolio`, `PortfolioItem`, `AnalysisHistory`, and `ChatMessage` models by inheriting from these mixins and utilizing the Enums we defined in `constants.py`?
+

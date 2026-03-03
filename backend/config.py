@@ -1,4 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+from constants import Environment
 
 class Settings(BaseSettings):
     """
@@ -6,7 +9,7 @@ class Settings(BaseSettings):
     Pydantic automatically reads the .env file and validates the types.
     """
     # Application Config
-    environment: str = "development"
+    environment: Environment = Environment.DEVELOPMENT
     backend_port: int = 8000  # Default to 8000 if not found in .env
     frontend_port: int = 5173
 
@@ -15,6 +18,9 @@ class Settings(BaseSettings):
     postgres_password: str
     postgres_db: str
     database_url: str | None = None
+
+    pool_size: int = 5
+    max_overflow: int = 10
 
     # AI Config
     gemini_api_key: str
@@ -31,7 +37,14 @@ class Settings(BaseSettings):
         """Construct the DB URL if it wasn't explicitly provided."""
         if self.database_url:
             return self.database_url
-        return f"postgresql://{self.postgres_user}:{self.postgres_password}@db:5432/{self.postgres_db}"
+        return URL.create(
+            drivername="postgresql",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host="db",
+            port=5432,
+            database=self.postgres_db
+        )
 
 # Instantiate as a singleton so it is loaded into memory exactly once
 Settings = Settings()
