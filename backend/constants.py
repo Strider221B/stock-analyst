@@ -65,3 +65,23 @@ class CORSConfig:
         "Origin",
         "X-Requested-With"
     ]
+
+class TableNames(StrEnum):
+    """Centralized table names for database models and foreign keys."""
+    USERS = "users"
+    PORTFOLIOS = "portfolios"
+    PORTFOLIO_ITEMS = "portfolio_items"
+    ANALYSIS_HISTORY = "analysis_history"
+    CHAT_SESSIONS = "chat_sessions"
+    CHAT_MESSAGES = "chat_messages"
+
+class RelNames(StrEnum):
+    """Centralized relationship names for SQLAlchemy back_populates."""
+    USER = "user"
+    PORTFOLIOS = "portfolios"
+    PORTFOLIO = "portfolio"
+    ITEMS = "items"
+    ANALYSIS_HISTORY = "analysis_history"
+    CHAT_SESSIONS = "chat_sessions"
+    SESSION = "session"
+    MESSAGES = "messages"

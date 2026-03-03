@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # AI Config
     gemini_api_key: str
+    db_encryption_key: str
 
     # Read from the local .env file
     model_config = SettingsConfigDict(
@@ -47,4 +48,4 @@ class Settings(BaseSettings):
         )
 
 # Instantiate as a singleton so it is loaded into memory exactly once
-Settings = Settings()
+settings = Settings()

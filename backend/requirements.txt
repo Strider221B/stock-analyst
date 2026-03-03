@@ -1,8 +1,10 @@
-fastapi
-uvicorn
-sqlalchemy
 alembic
+cryptography
+fastapi
+passlib[argon2]
 psycopg2-binary
 python-dotenv
 pydantic
 pydantic-settings
+sqlalchemy
+uvicorn
