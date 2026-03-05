@@ -1956,3 +1956,133 @@ def receive_checkin(dbapi_connection, connection_record):
 With these vulnerabilities patched, your database access layer is fully hardened.
 
 Would you like me to map out the Alembic configuration to generate the migration scripts, or should we move to defining the Pydantic schemas (Data Transfer Objects) for the API validation?
+
+## Prompt 17
+
+Can you go ahead with:
+Feature 1: Local Development & Foundation Setup
+User Story 3: FastAPI Backend Foundation & Schema Definition
+**Task 3.10:** Update `alembic.ini` and `env.py` to construct the database URL from environment variables and target the SQLAlchemy Base metadata.
+
+Setting up Alembic to read from your environment variables rather than a hardcoded file is the exact right approach for a secure, 12-factor application.
+
+By tying Alembic directly into your Pydantic `settings` and SQLAlchemy `Base`, you ensure your migration engine strictly follows the exact same configuration and schema as your live FastAPI application.
+
+If you haven't already initialized Alembic in your project, run `alembic init alembic` from inside your `/backend` directory. This creates the `alembic.ini` file and the `/alembic` folder.
+
+Here is how to wire them up to your architecture.
+
+### 1. Update `alembic.ini`
+
+Open the `alembic.ini` file in the root of your `/backend` directory.
+
+By default, Alembic puts a dummy `sqlalchemy.url` here. Because we are going to inject this dynamically from your `config.py` file, you should comment this line out or delete it to prevent confusion.
+
+```ini
+# alembic.ini (Snippet)
+
+# Comment out or remove this line entirely!
+# sqlalchemy.url = driver://user:pass@localhost/dbname
+
+```
+
+### 2. Update `alembic/env.py`
+
+The `env.py` file is the brain of the migration system. We need to modify it to do three things:
+
+1. Load your Pydantic `settings` to dynamically construct the database URL.
+2. Load your `Base.metadata` so Alembic knows where to look for tables.
+3. Import your `models.py` file so Alembic can actually "see" the tables you wrote.
+
+Open `/backend/alembic/env.py` and replace its contents with this completely integrated version:
+
+```python
+import logging
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
+from alembic import context
+
+# ==========================================
+# 1. Import Dynamic Configuration & Metadata
+# ==========================================
+import sys
+import os
+
+# Ensure the backend directory is on the Python path so absolute imports work
+sys.path.append(os.path.dirname(os.path.dirname(__dirname)))
+
+from config import settings
+from database import Base
+# IMPORTANT: You MUST import your models here, or Alembic will generate an empty migration!
+import models
+
+# ==========================================
+# Alembic Configuration Setup
+# ==========================================
+config = context.config
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+# 2. Point Alembic to your declarative base
+target_metadata = Base.metadata
+
+def get_url():
+    """Extracts the secure, dynamically generated DB URL from Pydantic."""
+    # Convert the SQLAlchemy URL object to a string for Alembic
+    return str(settings.get_database_url())
+
+def run_migrations_offline() -> None:
+    """Run migrations in 'offline' mode."""
+    url = get_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+def run_migrations_online() -> None:
+    """Run migrations in 'online' mode."""
+
+    # 3. Override the empty ini file config with our dynamic URL
+    configuration = config.get_section(config.config_ini_section, {})
+    configuration["sqlalchemy.url"] = get_url()
+
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            # Ensure Alembic also detects changes to string lengths or Enum types
+            compare_type=True
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+```
+
+### Why we added `compare_type=True`
+
+In the `context.configure()` block, I added `compare_type=True`. By default, Alembic only detects if a column was added or removed. With this flag enabled, Alembic will also detect if you change a `String(100)` to a `String(255)` or update an `Enum`, ensuring your Python models and your database schema remain perfectly synchronized.
+
+---
+
+With Alembic fully hooked into your environment and metadata, your database infrastructure is complete.
+
+Would you like me to walk you through the commands to autogenerate your first initial migration script and apply it to your PostgreSQL container?
