@@ -2325,7 +2325,7 @@ Next steps for your implementation:
 
 * Would you like to see the SQLAlchemy SessionEvents listener? This is the piece of code that detects the user_id from your application and runs SET LOCAL app.current_user_id = '...' at the start of every database transaction.
 
-## Prompts 21
+## Prompt 21
 
 Commands for fresh restart
 1. docker compose down -v
@@ -2336,3 +2336,45 @@ Commands for fresh restart
 1. sudo chown -R $USER:$USER .  ### on local machine so that we can edit the version file in next step
 1. Update the new version file with rls policy code.
 1. docker compose exec backend alembic upgrade head
+
+## Prompt 22
+
+How do I check my postgres db was setup correctly?
+
+To verify your PostgreSQL setup, including the tables and the Row Level Security (RLS) policies we configured, you can run commands directly inside the database container using psql. [1, 2]
+1. Connect to the Database
+Run this command to enter the interactive terminal for your specific database: [3]
+
+docker exec -it stock_db_dev psql -U postgres -d [YOUR_DB_NAME]
+
+(Replace [YOUR_DB_NAME] with the actual database name from your environment variables, often postgres by default). [3]
+2. Verify Tables Exist [4]
+Once inside the psql prompt, list all tables to ensure the migration or creation worked:
+
+\dt
+
+You should see users, portfolios, and portfolio_items listed. [5, 6]
+3. Check Row Level Security (RLS) Status [7]
+To confirm that RLS is both enabled and forced (the "safety net" we discussed), run:
+
+SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname IN ('users', 'portfolios', 'portfolio_items');
+
+
+* relrowsecurity: Should be t (true).
+* relforcerowsecurity: Should be t (true). This confirms it applies even to your app's owner account. [7, 8]
+
+4. Inspect the Policies
+To see the actual SQL logic of your isolation policies:
+
+SELECT * FROM pg_policies WHERE tablename IN ('users', 'portfolios', 'portfolio_items');
+
+Look at the qual column; it should contain your current_setting('app.current_user_id', true) logic. [9, 10]
+5. Verify the Unique Constraint
+To check the composite unique constraint needed for the PortfolioItem relationship:
+
+\d portfolios
+
+In the "Indexes" section at the bottom, you should see uq_portfolio_id_user_id UNIQUE, btree (id, user_id). [1, 11]
+What to do next:
+If these checks return the expected results, your database is fully secured. However, you will now notice that SELECT * returns zero rows because no user ID is set in the session.
+Would you like to see the SQLAlchemy Listener that automatically injects the user_id so your app can actually read its own data?
