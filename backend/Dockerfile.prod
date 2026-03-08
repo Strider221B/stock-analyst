@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 3. Install Python Dependencies (Using BuildKit cache for speed)
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --default-timeout=100 --no-cache-dir -r requirements.txt
 
 # 4. Install Playwright Browsers & OS Dependencies
 # Combining these into one layer saves space

@@ -1,5 +1,5 @@
 from sqlalchemy.types import TypeDecorator, LargeBinary
-from security import cipher_suite
+from db_components.security import cipher_suite
 
 class EncryptedText(TypeDecorator):
     """Transparently encrypts and decrypts text data at rest."""

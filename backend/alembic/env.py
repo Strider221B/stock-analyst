@@ -15,7 +15,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(current_dir))
 
 from config import settings
-from db_components.database import Base
+from db_components.models.base import Base
 # IMPORTANT: You MUST import your models here, or Alembic will generate an empty migration!
 # Need to declare classes n
 import db_components.models

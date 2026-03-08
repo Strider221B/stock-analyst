@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # To use the --mount syntax, ensure you have BuildKit enabled.
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip install --default-timeout=100 -r requirements.txt
 
 # 3. Setup Playwright (Fixed version to avoid re-downloads)
 # Use a specific path so browsers are easy to find and cache
