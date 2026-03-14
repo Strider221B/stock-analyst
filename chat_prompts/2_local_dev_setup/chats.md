@@ -2378,3 +2378,495 @@ In the "Indexes" section at the bottom, you should see uq_portfolio_id_user_id U
 What to do next:
 If these checks return the expected results, your database is fully secured. However, you will now notice that SELECT * returns zero rows because no user ID is set in the session.
 Would you like to see the SQLAlchemy Listener that automatically injects the user_id so your app can actually read its own data?
+
+## Prompt 23
+
+okay, let's go to the next set of stories:
+User Story 4: React Frontend Foundation
+As a developer, I want a containerized React frontend with Vite, Tailwind, and shadcn/ui configured so that I can start building the UI components.
+* **Task 4.1:** Run the Vite CLI to scaffold a React + TypeScript project inside the `/frontend` directory.
+* **Task 4.2:** Install Tailwind CSS, PostCSS, and Autoprefixer via npm in the `/frontend` directory.
+
+Transitioning from the database to the frontend is a great milestone. We are going to set up an extremely fast, modern frontend environment using Vite, React, TypeScript, and Tailwind CSS. This combination provides the exact foundation required to drop in `shadcn/ui` components later.
+
+Assuming you have Node.js installed locally to manage your frontend tooling, open your terminal and follow these steps to scaffold the project and inject Tailwind.
+
+### Task 4.1: Scaffold the React + TypeScript Project
+
+First, navigate into your `frontend` directory and initialize the Vite project. The `.` tells Vite to build the project directly in the current folder rather than creating a new subfolder.
+
+```bash
+cd frontend
+npm create vite@latest . -- --template react-ts
+
+```
+
+*(If Vite warns you that the directory is not empty because of your Dockerfiles, simply confirm and proceed).*
+
+Next, install the base React dependencies:
+
+```bash
+npm install
+
+```
+
+### Task 4.2: Install and Configure Tailwind CSS
+
+Tailwind requires a few peer dependencies (PostCSS and Autoprefixer) to process its utility classes into standard CSS during Vite's build step.
+
+**1. Install the dependencies:**
+
+```bash
+npm install -D tailwindcss postcss autoprefixer
+
+```
+
+**2. Generate the configuration files:**
+This command will automatically create both `tailwind.config.js` and `postcss.config.js` in your frontend directory.
+
+```bash
+npx tailwindcss init -p
+
+```
+
+**3. Configure the Template Paths:**
+Open the newly created `tailwind.config.js` file and update the `content` array. This tells Tailwind exactly which files to scan so it knows which CSS classes to compile and which to strip out for maximum performance.
+
+```javascript
+// /frontend/tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+}
+
+```
+
+**4. Inject the Tailwind Directives:**
+Open your `/frontend/src/index.css` file. Delete everything Vite put in there by default, and replace it with the three core Tailwind directives:
+
+```css
+/* /frontend/src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+```
+
+*(Note: You can also delete `App.css` completely, as we will be using Tailwind exclusively for styling).*
+
+---
+
+Your React foundation is now fully scaffolded and styled with Tailwind. Because you changed the `package.json` by adding these dependencies, **make sure to rebuild your Docker frontend container** so it installs them internally: `docker compose up -d --build`.
+
+Would you like to move on to **Task 4.3** and set up the absolute path aliases (e.g., `@/components/...`) in your `vite.config.ts` and `tsconfig.json` so we can initialize `shadcn/ui`?
+
+## Prompt 24
+
+I am getting this error:
+
+$ npx tailwindcss init -p
+npm error could not determine executable to run
+npm error A complete log of this run can be found in: /home/somesh/.npm/_logs/2026-03-11T04_08_08_885Z-debug-0.log
+
+This error is actually a blessing in disguise! You ran into this because `npm install tailwindcss` installed the brand-new **Tailwind CSS v4**, which fundamentally changed how Tailwind works.
+
+In Tailwind v4, there is no more `tailwind.config.js` or `postcss.config.js`. The engine has been completely rewritten to be CSS-first and configuration-free, meaning the `npx tailwindcss init` command you tried to run simply **does not exist anymore**.
+
+Since `shadcn/ui` fully supports Tailwind v4, we are going to use the modern, much cleaner setup.
+
+### 1. Fix Your Dependencies
+
+Tailwind v4 no longer requires `postcss` or `autoprefixer`. Instead, it uses a dedicated Vite plugin. Run these two commands in your `/frontend` directory to clean up the old packages and install the correct v4 plugin:
+
+```bash
+npm uninstall postcss autoprefixer
+npm install -D @tailwindcss/vite
+
+```
+
+### 2. Configure Vite
+
+Because there is no `tailwind.config.js`, we hook Tailwind directly into Vite's build process. Open your `/frontend/vite.config.ts` file and add the Tailwind plugin:
+
+```typescript
+// /frontend/vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    tailwindcss(),
+  ],
+})
+
+```
+
+### 3. Simplify Your CSS
+
+In Tailwind v4, you don't need the three `@tailwind` directives anymore. Open your `/frontend/src/index.css` file, delete everything inside, and replace it with a single CSS import:
+
+```css
+/* /frontend/src/index.css */
+@import "tailwindcss";
+
+```
+
+That is it! Your React frontend is now running the blazing-fast Tailwind v4 engine.
+
+---
+
+Would you like to move on to **Task 4.3** and set up the absolute path aliases (e.g., `@/components/...`) in your `tsconfig.json` and `vite.config.ts` so we can initialize `shadcn/ui` next?
+
+[Installing Shadcn UI with React, Vite, and Tailwind v4](https://www.youtube.com/watch?v=DcPDWQEnj4I)
+
+This video provides an excellent visual walkthrough of the exact Tailwind v4 and Shadcn UI integration process we are currently building for your frontend environment.
+
+## Prompt 25
+
+yes, go ahead with the next task
+
+To make `shadcn/ui` work seamlessly, it requires absolute path imports (e.g., `import { Button } from "@/components/ui/button"`). By default, Vite and TypeScript only understand clunky relative paths like `../../components/ui/button`.
+
+Here is how to configure path aliasing to bridge that gap.
+
+### 1. Install Node Types
+
+To resolve directory paths in your Vite configuration securely, you need Node's `path` module. Install the type definitions for it:
+
+```bash
+npm install -D @types/node
+
+```
+
+### 2. Update the TypeScript Config
+
+Open `tsconfig.app.json` (or `tsconfig.json`, depending on your exact Vite version) and add the `baseUrl` and `paths` properties directly inside the `compilerOptions` block. This stops your IDE from throwing red squiggly error lines when it sees the `@` symbol.
+
+```json
+{
+  "compilerOptions": {
+    // ... your existing options ...
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  }
+}
+
+```
+
+### 3. Update the Vite Config
+
+Finally, tell the Vite bundler how to handle that `@` symbol during the actual build process. Open your `vite.config.ts` and add the `resolve` block:
+
+```typescript
+import path from "path"
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    tailwindcss()
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+})
+
+```
+
+---
+
+With your aliasing configured, your frontend foundation is completely prepared for modern component libraries.
+
+Would you like to move on to **Task 4.4** and run the `shadcn-ui` initialization command to finalize your UI setup?
+
+## Prompt 26
+
+I see both the files:
+tsconfig.app.json
+tsconfig.json
+which one to use?
+
+This is a very recent change in how Vite scaffolds TypeScript projects, and it catches almost everyone off guard the first time they see it.
+
+You need to use **`tsconfig.app.json`**.
+
+Here is why Vite split them up:
+
+* **`tsconfig.json`:** This is now just a "traffic cop." It doesn't hold actual compiler settings anymore; it just points to the other files using project references.
+* **`tsconfig.app.json`:** This controls your actual React frontend code (everything inside the `/src` folder). Since your React components are the files that will be using the `@/components/...` imports, the aliases must go here.
+* **`tsconfig.node.json`:** This strictly controls configuration files that run in Node.js, like your `vite.config.ts` file.
+
+### The Update
+
+Open your **`tsconfig.app.json`** file and add the `baseUrl` and `paths` directly inside the `compilerOptions` object:
+
+```json
+{
+  "compilerOptions": {
+    // ... your existing options ...
+
+    // ADD THESE TWO PROPERTIES:
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": ["src"]
+}
+
+```
+
+By placing it here, VS Code and TypeScript will correctly resolve your absolute paths whenever you import a component into your React views.
+
+---
+
+With the path mapping successfully wired into both Vite and TypeScript, you are ready to bring in the UI library.
+
+Would you like the specific terminal command to initialize `shadcn/ui` and build out your `components.json` configuration file?
+
+## Prompt 26
+
+yes, move on to Task 4.4 and run the shadcn-ui initialization command to finalize your UI setup?
+
+To finalize your UI foundation, we will initialize `shadcn/ui`.
+
+Unlike traditional component libraries (like Material UI or Bootstrap) that you install as bloated npm dependencies, `shadcn/ui` injects the actual raw React and Tailwind code directly into your project repository. This gives you 100% control over the markup and styling.
+
+Make sure you are inside your `/frontend` directory in your terminal, and run the initialization command:
+
+```bash
+npx shadcn@latest init
+
+```
+
+### The Configuration Prompts
+
+The CLI will ask you a series of questions to configure your `components.json` file. Because you are using Vite instead of Next.js, a few of these answers are critical.
+
+Answer the prompts exactly like this:
+
+* **Which style would you like to use?** › `New York` *(Smaller text, more modern aesthetic).*
+* **Which color would you like to use as base color?** › `Zinc` *(Excellent for clean, professional data dashboards).*
+* **Do you want to use CSS variables for colors?** › `yes`
+* **Where is your global CSS file?** › `src/index.css`
+* **Are you using a custom tailwind prefix?** › *(Leave blank / No)*
+* **Where is your tailwind.config.js located?** › *(If it asks, just hit Enter. The new CLI natively understands Tailwind v4's CSS-only setup).*
+* **Configure the import alias for components:** › `@/components`
+* **Configure the import alias for utils:** › `@/lib/utils`
+* **Are you using React Server Components?** › **`no`** *(Crucial: Vite does not support RSCs).*
+* **Write configuration to components.json.** › `yes`
+
+### What Just Happened?
+
+Once the command finishes, it will have automatically generated a few key items in your project:
+
+1. **`components.json`:** The blueprint `shadcn` uses to know where to put new components.
+2. **`src/lib/utils.ts`:** A utility file containing the `cn()` function, which perfectly merges Tailwind classes together without conflicts.
+3. **`src/index.css` (Updated):** It injected a massive `@theme` block into your CSS file containing all of the specific hex codes for your new "Zinc" CSS variables.
+
+---
+
+Your modern frontend stack is now completely configured, aliased, and ready to go.
+
+Would you like to install your first UI component (like the `Button` or `Card` component) to verify the CSS and aliases are working correctly, or should we move on to configuring Vite's Docker network settings for Hot Module Replacement?
+
+## Prompt 27
+
+I am getting this:
+? Select a component library › - Use arrow-keys. Return to submit.
+❯   Radix
+    Base
+
+? Which preset would you like to use? › - Use arrow-keys. Return to submit.
+❯   Nova - Lucide / Geist
+    Vega
+    Maia
+    Lyra
+    Mira
+    Custom
+
+You should select **Radix**.
+
+Radix UI is the core headless component library that powers the vast majority of `shadcn/ui`'s complex interactive elements (like Modals, Dropdowns, and Tooltips).
+
+By choosing Radix, you ensure that all of your components come with built-in, enterprise-grade accessibility—handling things like keyboard navigation, focus management, and ARIA attributes completely behind the scenes—while Tailwind handles all the visual styling.
+
+Select **Radix** and hit Enter, then continue with the rest of the configuration prompts (like choosing the "New York" style and "Zinc" base color) as they appear.
+
+---
+
+Once the initialization finishes and your `components.json` is generated, would you like to install your first UI component (like the `Button`) to verify the CSS and aliases are working correctly, or should we move straight into configuring Vite's Docker network settings for Hot Module Replacement?
+
+You have hit the brand-new `shadcn/ui` CLI update! Instead of making you manually configure CSS variables and spacing, the framework now ships with five global architectural "presets."
+
+When your core focus is on backend architecture and system security, relying on these presets is a massive time-saver. They eliminate the need to endlessly tweak frontend CSS, instantly applying unified padding, margins, border radii, and density across every component you install.
+
+Here is exactly what the options mean:
+
+* **Vega:** The classic, original `shadcn/ui` look (formerly known as "New York"). It features a medium border radius and balanced spacing.
+* **Nova:** Tighter padding and reduced margins. Built specifically for dashboards, admin panels, and data-heavy interfaces.
+* **Maia:** Generous spacing and fully rounded corners. Very soft, friendly, and tailored for consumer-facing landing pages.
+* **Lyra:** Zero border radius. Sharp, boxy, and highly technical. It pairs perfectly with monospace fonts for developer tools and terminal emulators.
+* **Mira:** Ultra-compact. Designed for extremely dense, spreadsheet-style layouts where maximizing screen real estate is critical.
+
+### The Recommendation
+
+Because you are building a portfolio analysis system, your frontend will naturally rely heavily on data tables, stock metrics, and analytical charts.
+
+I highly recommend selecting **Nova**.
+
+It is engineered precisely for this type of application. It keeps the UI compact enough to fit dense financial data on the screen, but maintains enough breathing room so the interface doesn't feel cluttered.
+
+Use your arrow keys to select **Nova** (and then select **Geist** or **Inter** for the font if it prompts you) and hit Enter. The CLI will generate the perfect `components.json` and CSS variables for your dashboard.
+
+---
+
+Once the initialization finishes, would you like me to walk you through configuring Vite's Docker network settings for Hot Module Replacement so your browser actually auto-reloads when you write a new component?
+
+[Exclusive First Look at the New Shadcn UI](https://www.youtube.com/watch?v=Q83CfaMTajA)
+This video provides a comprehensive walkthrough of the new presets and architectural changes recently introduced in the shadcn ecosystem.
+
+## Prompt 28
+
+I am getting this error:
+$ npx shadcn@latest init
+Need to install the following packages:
+shadcn@4.0.3
+Ok to proceed? (y) y
+
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+✔ Select a component library › Radix
+✔ Which preset would you like to use? › Nova
+✔ Preflight checks.
+✔ Verifying framework. Found Vite.
+✔ Validating Tailwind CSS. Found v4.
+✖ Validating import alias.
+
+No import alias found in your tsconfig.json file.
+Visit https://ui.shadcn.com/docs/installation/vite to learn how to set an import alias.
+
+This is a frustrating, but very common, tooling mismatch.
+
+While Vite recently split its TypeScript configuration into multiple files (which is why we put the aliases inside `tsconfig.app.json` where they actually belong), the `shadcn` CLI's validation script hasn't fully caught up. Its preflight check is hardcoded to scan specifically inside the root `tsconfig.json` file for the `paths` object. Because it doesn't find them there, it forcefully aborts the installation.
+
+To bypass this preflight check, we simply need to duplicate the alias configuration into the root file so the CLI can see it.
+
+### The Fix
+
+Open your root `/frontend/tsconfig.json` file. It likely just contains a `files` array and a `references` array right now.
+
+Add the `compilerOptions` block with your aliases directly into this root file, so it looks like this:
+
+```json
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+
+```
+
+Once you save that file, run the initialization command one more time:
+
+```bash
+npx shadcn@latest init
+
+```
+
+The CLI will now successfully detect the `@/*` alias, pass the preflight check, and inject the core utility files into your `/src` directory.
+
+---
+
+Once the success message pops up, would you like to install a test component (like the Button) to verify everything compiled, or should we move right into configuring Vite's Docker network settings for Hot Module Replacement?
+
+## Prompt 29
+
+yes, please install a test component (like the Button) to verify everything compiled
+
+Installing a component is the ultimate test to ensure Vite, Tailwind v4, and your path aliases are all perfectly synchronized.
+
+Here is how to pull down your first component and render it on the screen.
+
+### 1. Add the Component via CLI
+
+Make sure you are still inside your `/frontend` directory in the terminal, and run the add command:
+
+```bash
+npx shadcn@latest add button
+
+```
+
+This command reaches out to the registry, downloads the raw React code for the Button (which includes all the Radix UI accessibility bindings and Tailwind variants), and saves it directly into your project at `/src/components/ui/button.tsx`.
+
+### 2. Implement it in `App.tsx`
+
+Let's wipe out the default Vite boilerplate and replace it with a clean test screen. Open your `/frontend/src/App.tsx` file and replace the entire file with this:
+
+```tsx
+import { Button } from "@/components/ui/button"
+
+function App() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 p-4">
+      <div className="space-y-6 text-center">
+        <h1 className="text-3xl font-bold tracking-tight text-zinc-50">
+          Frontend Foundation Active
+        </h1>
+        <p className="text-zinc-400">
+          Tailwind v4, path aliases, and UI components are fully compiled.
+        </p>
+
+        {/* The shadcn/ui component in action */}
+        <Button variant="default" size="lg">
+          Analyze Portfolio
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export default App
+
+```
+
+### 3. Verify the Build
+
+If your frontend Docker container is running, open your browser and navigate to `http://localhost:5173`.
+
+You should see a dark-themed screen with a perfectly styled, interactive button in the center. If the button looks unstyled or the `@/components` import throws an error, it means we have a compilation issue. If it looks great, your UI architecture is officially complete!
+
+---
+
+**The Docker HMR "Gotcha"**
+Right now, if you change the text on that button and hit save, your browser likely won't automatically update. You will have to manually refresh the page. This happens because Vite's Hot Module Replacement (HMR) uses WebSockets that don't know how to cross the Docker network bridge back to your host machine by default.
+
+Would you like me to provide the specific `server.watch` and `server.hmr` settings for your `vite.config.ts` file to fix this and enable instant hot-reloading?
+
