@@ -8,7 +8,7 @@ from db_components.models.base import Base
 from db_components.models.id_mixin import IDMixin
 from db_components.models.timestamp_mixin import TimestampMixin
 from db_components import rls_utils
-from db_components.security import pwd_context
+from db_components.security import get_password_hash, verify_password
 
 # Regex for basic email validation
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
@@ -40,15 +40,15 @@ class User(Base, IDMixin, TimestampMixin):
             raise ValueError("Password cannot be empty")
         if len(plain_password) > 128:
             raise ValueError("Password too long")
-        self._password_hash = pwd_context.hash(plain_password)
+        self._password_hash = get_password_hash(plain_password)
 
     def verify_password(self, password: str) -> bool:
         """Prevents timing attacks by ensuring a hashing operation occurs."""
         if not password:
             # Hash a dummy string to consume CPU time even on empty input
-            pwd_context.verify("dummy_password", self._password_hash)
+            verify_password("dummy_password", self._password_hash)
             return False
-        return pwd_context.verify(password, self._password_hash)
+        return verify_password(password, self._password_hash)
 
     @validates("email")
     def validate_email(self, key, address):

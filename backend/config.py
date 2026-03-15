@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     gemini_api_key: str
     db_encryption_key: str
 
+    # JWT Security
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+
+    # Short-lived Access Token (e.g., 15 minutes)
+    access_token_expire_minutes: int = 15
+
+    # Long-lived Refresh Token (e.g., 7 days)
+    refresh_token_expire_days: int = 7
+
     # Read from the local .env file
     model_config = SettingsConfigDict(
         env_file=".env",
