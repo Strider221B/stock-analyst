@@ -2,8 +2,10 @@
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from config import settings
 from constants import APITags, AppConfig, CORSConfig, Environment
+from routers.auth import router as auth_router
 
 class AppCreator:
     def __init__(self):
@@ -32,6 +34,8 @@ class AppCreator:
         )
 
     def _configure_routes(self):
+        self._app.include_router(auth_router)
+
         @self._app.get(f"{AppConfig.API_PREFIX}/health", tags=[APITags.SYSTEM])
         async def health_check():
             return {

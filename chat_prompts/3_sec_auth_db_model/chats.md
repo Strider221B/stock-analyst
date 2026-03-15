@@ -388,3 +388,125 @@ Ensure your jwt_secret_key is a high-entropy string. You can generate a perfect 
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 Would you like to move on to drafting the FastAPI route handlers for `/api/auth/register` and `/api/auth/login` so we can securely attach that Refresh Token to the `HttpOnly` cookie in the response?
+
+## Prompt 3
+
+Let's go to the next set of tasks:
+
+### User Story 2: FastAPI Authentication Endpoints
+
+**"As a backend developer, I want RESTful endpoints for registration, login, and logout that utilize HttpOnly cookies so that the frontend can authenticate securely against XSS attacks."**
+
+* **Task 2.1:** Create a `schemas.py` file to define Pydantic models for `UserCreate` (email, password), `UserLogin` (email, password), and `UserResponse` (id, email).
+* **Task 2.2:** Create an `auth.py` router file and include it in the main FastAPI application instance.
+
+Creating the Pydantic schemas and setting up the API router is where your application finally gets a defined external contract.
+
+Because we are dealing with user input, we want Pydantic to be as strict as possible. To validate email formats natively, you will need to add the email validator to your `/backend/requirements.txt` file (change `pydantic` to `pydantic[email]`), which allows us to use the powerful `EmailStr` type.
+
+Here is how to set up your schemas and route architecture.
+
+### Task 2.1: The Pydantic DTOs (`schemas.py`)
+
+Create a `schemas.py` file in your `/backend` directory. These classes define exactly what your API will accept from the frontend and exactly what it will return, stripping out sensitive data like passwords before the response hits the network.
+
+```python
+# /backend/schemas.py
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+import uuid
+
+# ---------------------------------------------------------
+# Authentication Payloads
+# ---------------------------------------------------------
+class UserCreate(BaseModel):
+    """Payload for registering a new user."""
+    # EmailStr strictly validates the format (e.g., no missing '@')
+    email: EmailStr
+    # Enforce minimum length at the API boundary, before it ever reaches the DB
+    password: str = Field(min_length=8, max_length=128)
+
+class UserLogin(BaseModel):
+    """Payload for authenticating an existing user."""
+    email: EmailStr
+    password: str
+
+# ---------------------------------------------------------
+# API Responses
+# ---------------------------------------------------------
+class UserResponse(BaseModel):
+    """Safe user data returned to the client (NO PASSWORDS)."""
+    id: uuid.UUID
+    email: EmailStr
+
+    # This allows Pydantic to read the data directly from your SQLAlchemy User model
+    model_config = ConfigDict(from_attributes=True)
+
+```
+
+### Task 2.2: The Router & Main App Configuration
+
+Next, let's create the routing foundation. It's best practice to keep your routes modular, so create a new directory called `routers` inside `/backend`, and add an `auth.py` file to it.
+
+**1. Create the Auth Router:**
+
+```python
+# /backend/routers/auth.py
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from schemas import UserCreate, UserLogin, UserResponse
+
+# Create the router instance with a strict prefix
+router = APIRouter(
+    prefix="/api/auth",
+    tags=["Authentication"]
+)
+
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=dict)
+async def register(user_in: UserCreate):
+    """Registers a new user and sets the HttpOnly refresh token."""
+    # Logic to be implemented in Task 2.3
+    return {"message": "User created successfully"}
+
+@router.post("/login", response_model=dict)
+async def login(user_in: UserLogin):
+    """Authenticates a user and sets the HttpOnly refresh token."""
+    # Logic to be implemented in Task 2.4
+    return {"user": {"id": "...", "email": "..."}}
+
+@router.post("/logout", status_code=status.HTTP_200_OK)
+async def logout():
+    """Clears the HttpOnly refresh token cookie."""
+    # Logic to be implemented in Task 2.5
+    return {"message": "Logged out"}
+
+```
+
+**2. Attach the Router to the Main App:**
+
+Finally, open your `/backend/main.py` file (or create it if you haven't yet) and register the auth router so FastAPI knows these endpoints exist.
+
+```python
+# /backend/main.py
+from fastapi import FastAPI
+from routers.auth import router as auth_router
+
+app = FastAPI(
+    title="Portfolio Analysis API",
+    description="Backend services for stock tracking and AI analysis",
+    version="1.0.0"
+)
+
+# Attach the authentication endpoints
+app.include_router(auth_router)
+
+@app.get("/health")
+async def health_check():
+    """Simple endpoint to verify the API is running."""
+    return {"status": "healthy"}
+
+```
+
+---
+
+With your API contract explicitly typed and your router wired into the main application loop, the scaffolding is complete.
+
+Would you like to move on to **Task 2.3** and write the actual database insertion and cookie-setting logic for the `/api/auth/register` endpoint?
