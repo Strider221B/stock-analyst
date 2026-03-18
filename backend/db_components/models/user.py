@@ -61,6 +61,9 @@ class User(Base, IDMixin, TimestampMixin):
 
         return normalized
 
+    def get_password_hash(self) -> str:
+        return self._password_hash
+
 # This is outside class because:
 # The Table Object: SQLAlchemy doesn't fully finalize the __table__ object (which the helper needs) until the class body has finished executing.
 # Clean Execution: Putting it outside ensures the User class is already in the global namespace so the event.listen can correctly reference User.__table__.

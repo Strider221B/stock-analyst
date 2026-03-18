@@ -74,3 +74,5 @@ def verify_token(token: str,  expected_type: str) -> dict:
         raise ValueError("Token has expired")
     except jwt.InvalidTokenError:
         raise ValueError("Invalid token")
+
+DUMMY_HASH = get_password_hash("dummy_password_for_timing_mitigation")

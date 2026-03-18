@@ -14,6 +14,12 @@ class UserResponse(BaseModel):
     email: EmailStr
     model_config = ConfigDict(from_attributes=True)
 
+class LoginResponse(BaseModel):
+    """Payload returned upon successful login."""
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
 # ---------------------------------------------------------
 # Authentication Payloads
 # ---------------------------------------------------------
