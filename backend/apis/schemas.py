@@ -1,29 +1,40 @@
-# /backend/schemas.py
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+import re
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 import uuid
+
+# ---------------------------------------------------------
+# API Responses (Change 6: Specific Response Schema)
+# ---------------------------------------------------------
+class MessageResponse(BaseModel):
+    """Standardized response for simple messaging."""
+    message: str
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    model_config = ConfigDict(from_attributes=True)
 
 # ---------------------------------------------------------
 # Authentication Payloads
 # ---------------------------------------------------------
 class UserCreate(BaseModel):
-    """Payload for registering a new user."""
-    # EmailStr strictly validates the format (e.g., no missing '@')
     email: EmailStr
-    # Enforce minimum length at the API boundary, before it ever reaches the DB
     password: str = Field(min_length=8, max_length=128)
 
+    # Change 3: Validate password strength at the API boundary
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one number")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
+            raise ValueError("Password must contain at least one special character")
+        return v
+
 class UserLogin(BaseModel):
-    """Payload for authenticating an existing user."""
     email: EmailStr
     password: str
-
-# ---------------------------------------------------------
-# API Responses
-# ---------------------------------------------------------
-class UserResponse(BaseModel):
-    """Safe user data returned to the client (NO PASSWORDS)."""
-    id: uuid.UUID
-    email: EmailStr
-
-    # This allows Pydantic to read the data directly from your SQLAlchemy User model
-    model_config = ConfigDict(from_attributes=True)

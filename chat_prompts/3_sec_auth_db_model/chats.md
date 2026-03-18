@@ -510,3 +510,247 @@ async def health_check():
 With your API contract explicitly typed and your router wired into the main application loop, the scaffolding is complete.
 
 Would you like to move on to **Task 2.3** and write the actual database insertion and cookie-setting logic for the `/api/auth/register` endpoint?
+
+## Prompt 4
+
+Yes, go ahead with task 2.3
+
+This is where all of our hard work on the database models and security utilities pays off.
+
+Because we built the password hashing directly into the `User` model via the `@password.setter`, the actual registration route logic becomes incredibly clean. You don't have to clutter your API endpoints with cryptography functions—you just instantiate the user, and the model secures itself.
+
+To make this work, we will need a database session. I will assume you have a standard dependency (like `get_db`) that yields a SQLAlchemy `Session`.
+
+Here is the complete implementation for your `/register` endpoint inside `/backend/routers/auth.py`:
+
+### Task 2.3: The Registration Route
+
+Open your `/backend/routers/auth.py` file and update it with the database insertion and cookie logic:
+
+```python
+# /backend/routers/auth.py
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+# Adjust these imports based on your exact file structure
+from schemas import UserCreate, UserLogin, UserResponse
+from security import create_refresh_token
+from config import settings
+from constants import Environment
+from db_components.models import User
+from db_components.session import get_db  # Assuming you have a standard DB dependency
+
+router = APIRouter(
+    prefix="/api/auth",
+    tags=["Authentication"]
+)
+
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=dict)
+async def register(user_in: UserCreate, response: Response, db: Session = Depends(get_db)):
+    """Registers a new user and sets the HttpOnly refresh token."""
+
+    # 1. Check if the email is already registered
+    existing_user = db.query(User).filter(User.email == user_in.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+
+    # 2. Instantiate the new user
+    # (The @password.setter automatically hashes the password here!)
+    new_user = User(
+        email=user_in.email,
+        password=user_in.password
+    )
+
+    # 3. Save to the database
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database integrity error occurred."
+        )
+
+    # 4. Generate the Long-Lived Refresh Token
+    # We use the user's UUID as the 'sub' (subject) claim
+    token_data = {"sub": str(new_user.id)}
+    refresh_token = create_refresh_token(token_data)
+
+    # 5. Set the HttpOnly Cookie
+    # This securely attaches the token to the browser, preventing XSS theft.
+    is_production = settings.environment == Environment.PRODUCTION
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,  # JavaScript cannot access this cookie
+        secure=is_production,  # Requires HTTPS in production
+        samesite="lax",  # Protects against CSRF attacks
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60
+    )
+
+    return {"message": "User created successfully"}
+
+# ... (keep the empty login and logout stubs for now) ...
+```
+
+### The Security Flags Explained
+The `response.set_cookie()` method is the backbone of this security architecture.
+* **`httponly=True`**: This is the absolute most important flag. It instructs the browser to completely hide this cookie from the `document.cookie` API. If a malicious script gets injected into your React frontend (XSS), it cannot steal this token.
+* **`secure=is_production`**: Over local HTTP (Docker/Vite), cookies won't set if `secure=True`. We dynamically toggle this so it works easily on your machine, but forces strict HTTPS execution when deployed.
+* **`samesite="lax"`**: This provides robust defense against Cross-Site Request Forgery (CSRF) by ensuring the browser only sends the cookie for top-level navigations or same-origin requests.
+
+---
+
+With registration smoothly handling password hashing and cookie injection, we are ready for the login flow.
+
+Would you like to proceed to **Task 2.4** and implement the `/api/auth/login` endpoint, including that advanced Argon2 "pro-move" rehashing check we built earlier?
+
+## Prompt 5
+
+Can you make the following changes:
+1. You check for an existing user - rely primarily on the database's Unique Constraint on the email column with try except
+2. For sensitive auth tokens, samesite="strict" instead of "lax"
+3. How are we handling password strength validation (length, special chars) before it even hits the route logic or the database model.
+4. Ensure new_user.id is actually available after the db.refresh(new_user)
+5. If the IntegrityError is triggered by a duplicate email, return the specific "Email already registered" error there too.
+6. You set response_model=dict. While it works, it’s better to define a specific Pydantic schema (e.g., MessageResponse) 
+
+These are incredibly sharp refinements. You are actively eliminating unnecessary database roundtrips, pushing validation to the outermost boundary of your application, and tightening security.
+
+Relying on the database's `UniqueConstraint` rather than running a preemptive `SELECT` query is exactly how high-performance APIs handle concurrency and race conditions.
+
+Here is how we implement all six of these upgrades.
+
+### 1. Upgrade `schemas.py` (Validation & Responses)
+
+To handle password strength before it ever touches your business logic, we will use a Pydantic `@field_validator`. We will also create the dedicated `MessageResponse` schema.
+
+Update your `/backend/schemas.py`:
+
+```python
+import re
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
+import uuid
+
+# ---------------------------------------------------------
+# API Responses (Change 6: Specific Response Schema)
+# ---------------------------------------------------------
+class MessageResponse(BaseModel):
+    """Standardized response for simple messaging."""
+    message: str
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+    model_config = ConfigDict(from_attributes=True)
+
+# ---------------------------------------------------------
+# Authentication Payloads
+# ---------------------------------------------------------
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+    # Change 3: Validate password strength at the API boundary
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one number")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
+            raise ValueError("Password must contain at least one special character")
+        return v
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+```
+
+### 2. Upgrade the `/register` Route
+
+Now we refactor the route to use the `try...except` block, tighten the cookie security, and ensure the SQLAlchemy model is refreshed.
+
+Update your `/backend/routers/auth.py`:
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+
+# Imported the new MessageResponse schema
+from schemas import UserCreate, UserLogin, UserResponse, MessageResponse
+from security import create_refresh_token
+from config import settings
+from constants import Environment
+from db_components.models import User
+from db_components.session import get_db
+
+router = APIRouter(
+    prefix="/api/auth",
+    tags=["Authentication"]
+)
+
+# Change 6: Use the explicit Pydantic response_model
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=MessageResponse)
+async def register(user_in: UserCreate, response: Response, db: Session = Depends(get_db)):
+    """Registers a new user and sets the HttpOnly refresh token."""
+
+    # Instantiate the new user
+    new_user = User(
+        email=user_in.email,
+        password=user_in.password
+    )
+
+    # Change 1 & 5: Rely on the DB Unique Constraint via try/except
+    try:
+        db.add(new_user)
+        db.commit()
+        # Change 4: Ensure the DB-generated fields (like ID) are loaded into the Python object
+        db.refresh(new_user)
+    except IntegrityError as e:
+        db.rollback()
+        # The 'orig' attribute holds the underlying DBAPI error.
+        # This catches standard PostgreSQL unique violation errors.
+        error_msg = str(e.orig).lower()
+        if "unique constraint" in error_msg or "duplicate key" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A database integrity error occurred."
+        )
+
+    # Generate the Long-Lived Refresh Token using the confirmed ID
+    token_data = {"sub": str(new_user.id)}
+    refresh_token = create_refresh_token(token_data)
+
+    # Set the HttpOnly Cookie
+    is_production = settings.environment == Environment.PRODUCTION
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=is_production,
+        samesite="strict",  # Change 2: Upgraded to strict for maximum protection
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60
+    )
+
+    # Change 6: Return the typed Pydantic model
+    return MessageResponse(message="User created successfully")
+```
+
+By removing the manual `SELECT` check, you have eliminated a potential race condition where two users with the exact same email submit the registration form at the exact same millisecond. The database is now the sole source of truth.
+
+Would you like to move on to implementing the `/api/auth/login` endpoint to verify these credentials and issue the short-lived Access Token alongside the Refresh Token?
