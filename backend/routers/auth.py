@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 # Imported the new MessageResponse schema
 from apis.schemas import UserCreate, UserLogin, LoginResponse, MessageResponse
-from db_components.security import create_refresh_token, create_access_token, check_needs_rehash, DUMMY_HASH, verify_password
+from db_components.models.token_block_list import TokenBlocklist
+from db_components.security import create_refresh_token, create_access_token, check_needs_rehash, DUMMY_HASH, verify_password, verify_token
 from config import settings
 from constants import Environment
 from db_components.models import User
@@ -124,3 +127,93 @@ async def login(user_in: UserLogin, response: Response, db: Session = Depends(ge
         access_token=access_token,
         user=user
     )
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    response: Response,
+    # Grab the cookie directly from the request
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    """Logs the user out and revokes the refresh token."""
+
+    # 1. Revoke the token in the database
+    if refresh_token:
+        try:
+            # Decode the token to get its ID and Expiration
+            payload = verify_token(refresh_token, "refresh")
+            jti = payload.get("jti")
+
+            # Convert the timestamp back to a timezone-aware datetime
+            exp_timestamp = payload.get("exp")
+            expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+
+            # Insert into the blocklist
+            revoked_token = TokenBlocklist(jti=jti, expires_at=expires_at)
+            db.add(revoked_token)
+            db.commit()
+
+        except ValueError:
+            # If the token is already expired or invalid, we don't care.
+            # We just proceed to clear the cookie.
+            pass
+
+    # 2. Clear the cookie from the browser
+    is_production = settings.environment == Environment.PRODUCTION
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=is_production,
+        samesite="strict"
+    )
+
+    return MessageResponse(message="Successfully logged out")
+
+@router.post("/refresh", response_model=LoginResponse)
+async def refresh_access_token(
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    """Issues a new short-lived access token using a valid refresh cookie."""
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token missing"
+        )
+
+    try:
+        # 1. Verify token signature and type
+        payload = verify_token(refresh_token, "refresh")
+        jti = payload.get("jti")
+        user_id = payload.get("sub")
+
+        # 2. Check the Blocklist
+        is_revoked = db.query(TokenBlocklist).filter(TokenBlocklist.jti == jti).first()
+        if is_revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again."
+            )
+
+        # 3. Verify the user still exists in the database
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User no longer exists."
+            )
+
+        # 4. Issue the new Access Token
+        new_access_token = create_access_token({"sub": str(user.id)})
+
+        return LoginResponse(
+            access_token=new_access_token,
+            user=user
+        )
+
+    except ValueError as e:
+        # Catches expired or cryptographically invalid tokens
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )

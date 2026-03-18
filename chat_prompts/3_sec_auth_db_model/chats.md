@@ -963,3 +963,236 @@ async def login(user_in: UserLogin, response: Response, db: Session = Depends(ge
 With this architecture, your authentication logic is bulletproof against enumeration, secure against timing vectors, gracefully handles database connection interruptions during opportunistic updates, and adheres to strict OOP principles.
 
 Would you like to quickly knock out the `/api/auth/logout` endpoint (Task 2.5) to clear that cookie, so we can wrap up Feature 2 and test the entire flow?
+
+## Prompt 8
+
+yes, proceed with /api/auth/logout
+
+The logout endpoint is the simplest of the three, but it comes with a very specific browser quirk: to reliably delete a heavily secured cookie, you have to tell the browser the exact security flags that were used to create it.
+
+If you try to delete a `samesite="strict"` cookie without specifying `samesite="strict"` in the deletion command, some browsers will simply ignore you and leave the token active.
+
+Here is the final route to cap off your authentication flow.
+
+### Task 2.5: The Logout Route
+
+Open `/backend/routers/auth.py` and add this right below your login route:
+
+```python
+# /backend/routers/auth.py
+
+# ... (Existing /register and /login routes) ...
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(response: Response):
+    """
+    Clears the HttpOnly refresh token cookie to end the user's session.
+    The frontend is responsible for discarding the in-memory access token.
+    """
+    is_production = settings.environment == Environment.PRODUCTION
+
+    # We must match the strict security flags used during creation
+    # so the browser knows exactly which cookie to destroy.
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=is_production,
+        samesite="strict"
+    )
+
+    return MessageResponse(message="Successfully logged out")
+```
+
+### The Frontend's Responsibility
+Because your short-lived **Access Token** is sent in the JSON body (not a cookie), your FastAPI backend has no way to forcefully reach into the user's browser and delete it.
+
+When a user clicks "Logout", your React frontend must do two things:
+1. Call this `POST /api/auth/logout` endpoint to destroy the permanent Refresh Token cookie.
+2. Clear the Access Token out of its own React state (or Context/Zustand store).
+
+Even if a malicious script somehow captured that Access Token right before logout, it will automatically expire in 15 minutes anyway, and without the Refresh Token, the attacker cannot get a new one.
+
+---
+
+**Feature 2 is officially complete.** You now have a highly secure, dual-token authentication system mitigating timing attacks, XSS, and CSRF.
+
+Before we move on to building the actual Portfolio/Stock features, we need a way to lock those specific routes down so only authenticated users can access them.
+
+Would you like me to write the FastAPI `get_current_user` dependency (which will read the Bearer token from the header and attach the `User` object to the request), or would you prefer to spin up Swagger UI and test this auth flow first?
+
+## Prompt 9
+
+If someone stole that refresh_token string before the user logged out, they could still use it to generate new access tokens until the original max_age is reached.
+Can you also store the jti (unique ID) of the refresh token in "blocklist" database table upon logout. Then, your refresh logic would check if the token is "revoked" before issuing a new one.
+
+You are spot on. This is the fundamental trade-off of stateless JWT authentication: because the server doesn't keep a session in memory, it has no native way to forcefully invalidate a token before its expiration date.
+
+Implementing a database-backed blocklist (often called a denylist) specifically for the `jti` (JWT ID) is the exact enterprise pattern used to solve this. It gives you the performance of stateless access tokens with the security of stateful sessions.
+
+Here is how we weave this revocation architecture into your existing system.
+
+### 1. The Database Model
+
+First, we need a lightweight table to store revoked tokens. We also want to store the `expires_at` timestamp so you can run a cron job or Celery task later to periodically delete expired tokens from this table and keep it small.
+
+Add this to your `/backend/db_components/models.py`:
+
+```python
+# /backend/db_components/models.py
+from datetime import datetime
+from sqlalchemy.types import String
+from sqlalchemy.orm import Mapped, mapped_column
+
+# (Assuming you add TOKEN_BLOCKLIST to your TableNames constants)
+class TokenBlocklist(Base, IDMixin):
+    __tablename__ = "token_blocklist"
+
+    # The JWT ID (jti) is a standard UUID string
+    jti: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
+
+    # We store the expiration so a background job can clean up this table later
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+```
+*(Remember to generate and apply an Alembic migration for this new table!)*
+
+### 2. Injecting the `jti` into the Tokens
+
+We need every token to generate its own unique identifier. Open `/backend/security.py` and update the `_create_token` helper function to inject a `jti` using Python's `uuid` library.
+
+```python
+# /backend/security.py
+import uuid
+# ... existing imports ...
+
+def _create_token(data: dict, expires_delta: timedelta, token_type: str) -> str:
+    """Internal helper to generate signed JWTs with a strict type claim and unique JTI."""
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + expires_delta
+
+    # FIXED: Inject the jti claim
+    to_encode.update({
+        "exp": expire,
+        "type": token_type,
+        "jti": str(uuid.uuid4())
+    })
+
+    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+```
+
+### 3. Upgrading the `/logout` Route
+
+Now we update the logout route to grab the cookie, decode it to extract the `jti` and expiration date, and insert it into the blocklist table before telling the browser to destroy the cookie.
+
+Update your logout endpoint in `/backend/routers/auth.py`:
+
+```python
+# /backend/routers/auth.py
+from fastapi import Cookie
+from datetime import datetime, timezone
+from db_components.models import TokenBlocklist
+from security import verify_token
+
+# ...
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    response: Response,
+    # Grab the cookie directly from the request
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    """Logs the user out and revokes the refresh token."""
+
+    # 1. Revoke the token in the database
+    if refresh_token:
+        try:
+            # Decode the token to get its ID and Expiration
+            payload = verify_token(refresh_token, "refresh")
+            jti = payload.get("jti")
+
+            # Convert the timestamp back to a timezone-aware datetime
+            exp_timestamp = payload.get("exp")
+            expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+
+            # Insert into the blocklist
+            revoked_token = TokenBlocklist(jti=jti, expires_at=expires_at)
+            db.add(revoked_token)
+            db.commit()
+
+        except ValueError:
+            # If the token is already expired or invalid, we don't care.
+            # We just proceed to clear the cookie.
+            pass
+
+    # 2. Clear the cookie from the browser
+    is_production = settings.environment == Environment.PRODUCTION
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        secure=is_production,
+        samesite="strict"
+    )
+
+    return MessageResponse(message="Successfully logged out")
+```
+
+### 4. The `/refresh` Endpoint (The Missing Link)
+
+Since we are talking about refresh logic, you will need the actual endpoint that the React frontend calls when its 15-minute Access Token dies. This is where we verify the token *hasn't* been blocked.
+
+Add this endpoint to `/backend/routers/auth.py`:
+
+```python
+@router.post("/refresh", response_model=LoginResponse)
+async def refresh_access_token(
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    """Issues a new short-lived access token using a valid refresh cookie."""
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token missing"
+        )
+
+    try:
+        # 1. Verify token signature and type
+        payload = verify_token(refresh_token, "refresh")
+        jti = payload.get("jti")
+        user_id = payload.get("sub")
+
+        # 2. Check the Blocklist
+        is_revoked = db.query(TokenBlocklist).filter(TokenBlocklist.jti == jti).first()
+        if is_revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again."
+            )
+
+        # 3. Verify the user still exists in the database
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User no longer exists."
+            )
+
+        # 4. Issue the new Access Token
+        new_access_token = create_access_token({"sub": str(user.id)})
+
+        return LoginResponse(
+            access_token=new_access_token,
+            user=user
+        )
+
+    except ValueError as e:
+        # Catches expired or cryptographically invalid tokens
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e)
+        )
+```
+
+With this in place, if an attacker steals a refresh token, the moment the legitimate user hits "Logout", that `jti` hits the blocklist. When the attacker tries to hit the `/refresh` route, the database intercepts the request and neutralizes the stolen token.
+
+Would you like to build the `get_current_user` dependency next, which will parse the `Authorization: Bearer <token>` header so you can finally start building the protected portfolio routes?

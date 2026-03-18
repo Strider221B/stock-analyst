@@ -1,5 +1,7 @@
 import jwt
+import uuid
 from datetime import datetime, timedelta, timezone
+
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from cryptography.fernet import Fernet
@@ -39,13 +41,14 @@ def check_needs_rehash(hashed_password: str) -> bool:
 # 2. JWT Generation & Verification
 # ---------------------------------------------------------
 def _create_token(data: dict, expires_delta: timedelta, token_type: str) -> str:
-    """Internal helper to generate signed JWTs."""
+    """Internal helper to generate signed JWTs with a strict type claim and unique JTI."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + expires_delta
-    # Inject the type claim to prevent token substitution attacks
+
     to_encode.update({
         "exp": expire,
-        "type": token_type
+        "type": token_type,
+        "jti": str(uuid.uuid4())
     })
 
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)

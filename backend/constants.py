@@ -74,6 +74,7 @@ class TableNames(StrEnum):
     ANALYSIS_HISTORY = "analysis_history"
     CHAT_SESSIONS = "chat_sessions"
     CHAT_MESSAGES = "chat_messages"
+    TOKEN_BLOCK_LIST = 'token_blocklist'
 
 class RelNames(StrEnum):
     """Centralized relationship names for SQLAlchemy back_populates."""
