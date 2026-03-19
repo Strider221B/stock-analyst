@@ -5,5 +5,6 @@ from .chat_session import ChatSession
 from .id_mixin import IDMixin
 from .portfolio import Portfolio
 from .portfolio_item import PortfolioItem
+from .token_block_list import TokenBlocklist
 from .timestamp_mixin import TimestampMixin
 from .user import User

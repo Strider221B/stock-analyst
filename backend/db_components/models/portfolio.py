@@ -12,7 +12,7 @@ from db_components import rls_utils
 class Portfolio(Base, IDMixin, TimestampMixin):
     __tablename__ = TableNames.PORTFOLIOS
 
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{TableNames.USERS}.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(f"{TableNames.USERS}.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     account_type: Mapped[AccountType] = mapped_column(

@@ -1,27 +1,24 @@
 # syntax=docker/dockerfile:1
-FROM python:3.12-slim
+# Microsoft already spent 40 minutes building this layer so you don't have to.
+# Note: Ensure 'v1.58.0' exactly matches the playwright version in requirements.txt
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble
 
 WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# 1. Install System Dependencies First (Changes Rarely)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# 2. Use Cache Mount for Pip (Speeds up dependency changes)
-# To use the --mount syntax, ensure you have BuildKit enabled.
+# 1. Install Python Dependencies
+# Using Docker's BuildKit cache means subsequent pip installs take seconds
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --default-timeout=100 -r requirements.txt
+    pip install -r requirements.txt
 
-# 3. Setup Playwright (Fixed version to avoid re-downloads)
-# Use a specific path so browsers are easy to find and cache
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install chromium && playwright install-deps
-
-# 4. Copy Source Code Last (Changes most frequently)
-# This prevents code edits from triggering pip installs or browser downloads
+# 2. Copy Source Code Last
+# Changes to your code will ONLY trigger this fast copy step, skipping pip entirely.
 COPY . .
+
+# 3. Security: Run as non-root
+# The Microsoft image conveniently comes with a pre-configured non-root user called 'pwuser'
+USER pwuser
 
 CMD ["python", "main.py"]

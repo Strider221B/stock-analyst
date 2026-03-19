@@ -19,11 +19,13 @@ class PortfolioItem(Base, IDMixin):
         index=True
     )
 
-    portfolio_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    portfolio_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     added_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
-    portfolio: Mapped["Portfolio"] = relationship("Portfolio", back_populates=RelNames.ITEMS)
+    portfolio: Mapped["Portfolio"] = relationship("Portfolio",
+                                                  back_populates=RelNames.ITEMS,
+                                                  primaryjoin="and_(PortfolioItem.portfolio_id == Portfolio.id, PortfolioItem.user_id == Portfolio.user_id)")
 
     __table_args__ = (
         # 1. Unique constraint: One ticker per portfolio

@@ -1196,3 +1196,440 @@ async def refresh_access_token(
 With this in place, if an attacker steals a refresh token, the moment the legitimate user hits "Logout", that `jti` hits the blocklist. When the attacker tries to hit the `/refresh` route, the database intercepts the request and neutralizes the stolen token.
 
 Would you like to build the `get_current_user` dependency next, which will parse the `Authorization: Bearer <token>` header so you can finally start building the protected portfolio routes?
+
+## Prompt 10
+
+Can you go ahead with task 2.7:
+* **Task 2.7:** Create a database seed script to test the portfolio models by creating mock portfolios with different `account_type` values (e.g., testing both 'DOMESTIC' and 'INTERNATIONAL' data constraints).
+
+A robust database seed script is essential for local development. It saves you from having to manually register a user and click through the UI just to populate your tables every time you wipe the database or spin up a fresh Docker volume.
+
+Since we are testing specific 'DOMESTIC' and 'INTERNATIONAL' constraints, we will create a mock user and give them two distinct portfolios that mirror real-world financial tracking scenarios—like managing local exchange assets alongside international brokerage accounts.
+
+Here is the complete seed script. Create a new file called `seed.py` in your `/backend` directory.
+
+### Task 2.7: The Database Seed Script
+
+```python
+# /backend/seed.py
+import logging
+from sqlalchemy.exc import IntegrityError
+from db_components.session import SessionLocal
+from db_components.models import User, Portfolio, PortfolioItem
+# Assuming AccountType Enum is defined in your constants or models
+from constants import AccountType
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def seed_database():
+    db = SessionLocal()
+    try:
+        logger.info("Starting database seed process...")
+
+        # 1. Create a Test User
+        # Using the @password.setter we built earlier to handle the Argon2 hashing safely
+        test_email = "developer@example.com"
+        user = db.query(User).filter(User.email == test_email).first()
+
+        if not user:
+            user = User(email=test_email, password="SecurePassword123!")
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Created test user: {test_email}")
+        else:
+            logger.info(f"Test user already exists: {test_email}")
+
+        # 2. Create a DOMESTIC Portfolio (e.g., National Stock Exchange holdings)
+        domestic_portfolio = db.query(Portfolio).filter(
+            Portfolio.user_id == user.id,
+            Portfolio.name == "NSE Core Holdings"
+        ).first()
+
+        if not domestic_portfolio:
+            domestic_portfolio = Portfolio(
+                user_id=user.id,
+                name="NSE Core Holdings",
+                account_type=AccountType.DOMESTIC,
+                description="Primary domestic equity tracking"
+            )
+            db.add(domestic_portfolio)
+            db.commit()
+            db.refresh(domestic_portfolio)
+
+            # Add Domestic Tickers
+            domestic_tickers = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
+            for ticker in domestic_tickers:
+                db.add(PortfolioItem(portfolio_id=domestic_portfolio.id, ticker=ticker))
+
+            logger.info("Created DOMESTIC portfolio and seeded items.")
+
+        # 3. Create an INTERNATIONAL Portfolio (e.g., Brokerage RSUs with W-8BEN tax status)
+        international_portfolio = db.query(Portfolio).filter(
+            Portfolio.user_id == user.id,
+            Portfolio.name == "Fidelity RSU & ESPP"
+        ).first()
+
+        if not international_portfolio:
+            international_portfolio = Portfolio(
+                user_id=user.id,
+                name="Fidelity RSU & ESPP",
+                account_type=AccountType.INTERNATIONAL,
+                description="Vested employer stock and international assets"
+            )
+            db.add(international_portfolio)
+            db.commit()
+            db.refresh(international_portfolio)
+
+            # Add International Tickers
+            international_tickers = ["AAPL", "GOOGL", "MSFT"]
+            for ticker in international_tickers:
+                db.add(PortfolioItem(portfolio_id=international_portfolio.id, ticker=ticker))
+
+            logger.info("Created INTERNATIONAL portfolio and seeded items.")
+
+        db.commit()
+        logger.info("Database seeding completed successfully!")
+
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Database integrity error during seeding: {e}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"An unexpected error occurred: {e}")
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    seed_database()
+```
+
+### How to Run the Script in Docker
+
+Because your database is running inside the Docker network, you need to execute this script from within the FastAPI backend container so it can resolve the database connection string correctly.
+
+From the root of your project, run:
+
+```bash
+docker compose exec backend python seed.py
+```
+
+You should see the logging output confirming the creation of the user, the NSE domestic portfolio, and the Fidelity international portfolio. If you run the command a second time, the script will safely detect the existing user and skip creation, preventing duplicates.
+
+---
+
+With your database seeded and authentication fully secured, the backend foundation is incredibly solid.
+
+Would you like to write the `get_current_user` FastAPI dependency next so we can start building the protected `GET /api/portfolios` routes to fetch this seeded data?
+
+## Prompt 11
+
+Can you make this changes:
+1. Add all objects to the session (db.add()) and perform one single commit at the very end.
+2. Use db.flush() after creating the user. 
+3. Check for the existence of the PortfolioItem inside your ticker loops.
+4. Ensure your User model is actually imported in a way that triggers @password.setter logic.
+
+These are excellent, senior-level database optimizations.
+
+By switching to a single `db.commit()` at the end, you are wrapping the entire seeding process inside a single database transaction. If anything fails halfway through (like a typo in a ticker symbol), the `db.rollback()` in the exception handler will undo everything, preventing orphaned records and partial states.
+
+Using `db.flush()` is exactly the right tool here. It pushes the pending SQL statements to PostgreSQL so that the database generates the `id` (UUID) for the User and Portfolios, which you can then immediately use for the foreign keys on the `PortfolioItem`, all without permanently committing the transaction.
+
+Here is the fully optimized seed script:
+
+```python
+# /backend/seed.py
+import logging
+from sqlalchemy.exc import IntegrityError
+from db_components.session import SessionLocal
+from db_components.models import User, Portfolio, PortfolioItem
+from constants import AccountType
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def seed_database():
+    db = SessionLocal()
+    try:
+        logger.info("Starting database seed process...")
+
+        # 1. Create a Test User
+        test_email = "developer@example.com"
+        user = db.query(User).filter(User.email == test_email).first()
+
+        if not user:
+            # Change 4: Passing 'password' as a kwarg here automatically triggers
+            # the @password.setter logic defined in the User model, hashing it instantly.
+            user = User(email=test_email, password="SecurePassword123!")
+            db.add(user)
+
+            # Change 2: Flush to get the user.id without committing the transaction
+            db.flush()
+            logger.info(f"Created test user: {test_email}")
+        else:
+            logger.info(f"Test user already exists: {test_email}")
+
+        # 2. Create a DOMESTIC Portfolio
+        domestic_portfolio = db.query(Portfolio).filter(
+            Portfolio.user_id == user.id,
+            Portfolio.name == "NSE Core Holdings"
+        ).first()
+
+        if not domestic_portfolio:
+            domestic_portfolio = Portfolio(
+                user_id=user.id,
+                name="NSE Core Holdings",
+                account_type=AccountType.DOMESTIC,
+                description="Primary domestic equity tracking"
+            )
+            db.add(domestic_portfolio)
+            db.flush() # Flush to get the domestic_portfolio.id
+            logger.info("Created DOMESTIC portfolio.")
+
+        # Change 3: Check existence of PortfolioItems inside the loop
+        domestic_tickers = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
+        for ticker in domestic_tickers:
+            existing_item = db.query(PortfolioItem).filter(
+                PortfolioItem.portfolio_id == domestic_portfolio.id,
+                PortfolioItem.ticker == ticker
+            ).first()
+            if not existing_item:
+                db.add(PortfolioItem(portfolio_id=domestic_portfolio.id, ticker=ticker))
+                logger.info(f"Added ticker {ticker} to DOMESTIC portfolio.")
+
+        # 3. Create an INTERNATIONAL Portfolio
+        international_portfolio = db.query(Portfolio).filter(
+            Portfolio.user_id == user.id,
+            Portfolio.name == "Fidelity RSU & ESPP"
+        ).first()
+
+        if not international_portfolio:
+            international_portfolio = Portfolio(
+                user_id=user.id,
+                name="Fidelity RSU & ESPP",
+                account_type=AccountType.INTERNATIONAL,
+                description="Vested employer stock and international assets"
+            )
+            db.add(international_portfolio)
+            db.flush() # Flush to get the international_portfolio.id
+            logger.info("Created INTERNATIONAL portfolio.")
+
+        # Change 3: Check existence of PortfolioItems inside the loop
+        international_tickers = ["AAPL", "GOOGL", "MSFT"]
+        for ticker in international_tickers:
+            existing_item = db.query(PortfolioItem).filter(
+                PortfolioItem.portfolio_id == international_portfolio.id,
+                PortfolioItem.ticker == ticker
+            ).first()
+            if not existing_item:
+                db.add(PortfolioItem(portfolio_id=international_portfolio.id, ticker=ticker))
+                logger.info(f"Added ticker {ticker} to INTERNATIONAL portfolio.")
+
+        # Change 1: A single, atomic commit at the very end.
+        db.commit()
+        logger.info("Database seeding completed successfully!")
+
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Database integrity error during seeding: {e}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"An unexpected error occurred: {e}")
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    seed_database()
+```
+
+You can run this script as many times as you want without causing duplicate constraint errors, and it will execute in a single, safe transaction block.
+
+Run `docker compose exec backend python seed.py` to populate the data.
+
+Would you like to write the `get_current_user` FastAPI dependency next, so we can start building the protected `GET /api/portfolios` routes to fetch this freshly seeded data?
+
+## Prompt 12
+
+in my database should I do this?
+
+You have an index on id (ix_portfolios_id), but your RLS policy filters by user_id.
+
+The Issue: Every single query to portfolios or portfolio_items will now include a WHERE user_id = ... clause behind the scenes.
+The Fix: Ensure you have a Composite Index on (user_id, id) or at least a standalone index on user_id. Without it, as your portfolios table grows to thousands of rows, Postgres might have to do full table scans to find one user's data.
+
+Yes, you absolutely should add an index on `user_id`. Whoever pointed this out gave you excellent advice, but we need to clarify exactly *which* type of index you need so you don't over-engineer your database.
+
+Here is exactly what happens under the hood when you use PostgreSQL Row Level Security (RLS) and how to optimize for it.
+
+### How RLS Interacts with Indexes
+
+When you activate an RLS policy that restricts data to a specific tenant (e.g., `user_id = current_setting('app.current_user_id')::uuid`), PostgreSQL's query planner invisibly rewrites every single query to include that `WHERE` clause before execution.
+
+This creates two distinct querying scenarios for your application:
+
+#### Scenario 1: Fetching a specific portfolio (`GET /api/portfolios/123`)
+Your SQLAlchemy query looks like this: `session.query(Portfolio).filter(id=123).first()`.
+Under the hood, RLS rewrites it to:
+`SELECT * FROM portfolios WHERE id = 123 AND user_id = 'user-uuid';`
+
+**Do you need a composite index `(user_id, id)` for this? No.**
+Because `id` is a primary key (and highly selective), Postgres will hit the existing `ix_portfolios_id` index, instantly find the single row in memory, and *then* evaluate if the `user_id` matches. It is incredibly fast and requires zero full table scans.
+
+#### Scenario 2: Fetching a user's dashboard (`GET /api/portfolios`)
+Your SQLAlchemy query looks like this: `session.query(Portfolio).all()`.
+Under the hood, RLS rewrites it to:
+`SELECT * FROM portfolios WHERE user_id = 'user-uuid';`
+
+**Do you need an index for this? YES.**
+Because there is no `id` in the `WHERE` clause, Postgres cannot use the primary key index. Without an index on `user_id`, Postgres is forced to scan every single row in the `portfolios` table to see if it belongs to the current user. As your application scales, this will bottleneck your dashboard loading times.
+
+### The Solution: A Standalone Index
+
+You do not need a composite index on `(user_id, id)`. A standalone index on `user_id` is the perfect solution. It completely solves the table scan issue for list queries while keeping your index overhead minimal during `INSERT` and `UPDATE` operations.
+
+Here is how you update your SQLAlchemy model to implement this:
+
+```python
+# /backend/db_components/models.py
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+class Portfolio(Base, IDMixin):
+    __tablename__ = "portfolios"
+
+    # Add index=True right here
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # ... rest of your columns
+```
+
+*(Note: You will also want to add `index=True` to the `portfolio_id` foreign key inside your `PortfolioItem` model for the exact same reason!)*
+
+Once you update the models, you will need to generate a new Alembic migration (`alembic revision --autogenerate -m "add user_id index"`) and apply it.
+
+---
+
+Would you like me to help write the FastAPI dependency (`get_current_user`) that reads the JWT, so we can pass that user context directly into your Postgres RLS session variables?
+
+## Prompt 13
+
+Your RLS is now "locked," but it's too locked. If you run a query now, it will return nothing because current_setting('app.current_user_id') is empty.
+Can you add the SQLAlchemy Event Listener that injects the user's ID into the Postgres session after every connect?
+
+Yes, this is a massive, application-breaking problem. In fact, it is the number one "gotcha" when implementing Row Level Security (RLS) in a backend API.
+
+Because you enabled RLS, PostgreSQL's default stance instantly became **"Deny All."** If your FastAPI application queries the database without explicitly telling Postgres *who* is making the request, `current_setting('app.current_user_id')` evaluates to nothing. The database assumes an unauthenticated actor is snooping around and returns zero rows, effectively locking your API out of its own data.
+
+To solve this, we need to bridge the gap between FastAPI's web requests and SQLAlchemy's database connections.
+
+Here is exactly how to implement the `rls_utils` session-setter logic. We will use Python's `contextvars` to safely track the user ID across asynchronous API requests, and a SQLAlchemy `checkout` event to dynamically inject that ID into the Postgres session every time a connection is pulled from the pool.
+
+### 1. Create the RLS Utilities
+
+Create a new file called `rls_utils.py` in your `/backend/db_components` directory (or wherever you keep your database configuration).
+
+```python
+# /backend/db_components/rls_utils.py
+from contextvars import ContextVar
+from sqlalchemy import DDL, event
+from sqlalchemy.engine import Engine
+
+# ---------------------------------------------------------
+# 1. THE KEY: Context Variable for FastAPI Requests
+# ---------------------------------------------------------
+# This holds the user's ID securely in memory while an async request is processing.
+current_user_id_ctx_var: ContextVar[str | None] = ContextVar("current_user_id", default=None)
+
+# ---------------------------------------------------------
+# 2. THE LOCKS: DDL Generators (Your existing code)
+# ---------------------------------------------------------
+def get_rls_statements(table_name: str, owner_column: str = "user_id"):
+    """
+    Generates the standard 3-step RLS setup:
+    1. Enable RLS
+    2. Force RLS (applies to table owner/service account)
+    3. Create the isolation policy based on a session variable
+    """
+    policy_name = f"{table_name}_isolation_policy"
+
+    return [
+        f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY;",
+        f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY;",
+        f"DROP POLICY IF EXISTS {policy_name} ON {table_name};",
+        f"CREATE POLICY {policy_name} ON {table_name} "
+        f"USING ({owner_column} = current_setting('app.current_user_id', true)::uuid);"
+    ]
+
+def attach_rls_to_model(model_class, owner_column: str = "user_id"):
+    """
+    Attaches RLS DDL to the SQLAlchemy 'after_create' event.
+    Use this inside your Model files.
+    """
+    statements = get_rls_statements(model_class.__tablename__, owner_column)
+    for stmt in statements:
+        event.listen(model_class.__table__, "after_create", DDL(stmt))
+
+# ---------------------------------------------------------
+# 3. THE BRIDGE: Session Checkout Listener
+# ---------------------------------------------------------
+@event.listens_for(Engine, "checkout")
+def set_tenant_context(dbapi_connection, connection_record, connection_proxy):
+    """
+    Intercepts every connection right before SQLAlchemy uses it.
+    Reads the ContextVar and injects the user ID directly into the Postgres session.
+    """
+    user_id = current_user_id_ctx_var.get()
+    cursor = dbapi_connection.cursor()
+
+    try:
+        if user_id:
+            # SET LOCAL scopes the variable strictly to the current database transaction.
+            cursor.execute("SELECT set_config('app.current_user_id', %s, true);", (str(user_id),))
+        else:
+            # If no user is logged in, explicitly clear the setting so Postgres defaults to denying access.
+            cursor.execute("SELECT set_config('app.current_user_id', '', true);")
+    finally:
+        cursor.close()
+```
+
+*(Note: Ensure that whatever file creates your SQLAlchemy `engine` imports this `rls_utils` file so the event listener is actively registered!)*
+
+### 2. How to "Turn the Key"
+
+Now that the listener is attached to the engine, it will automatically look for a value inside `current_user_id_ctx_var` every time your app talks to the database.
+
+The final piece of the puzzle is simply dropping the user's ID into that variable the moment they authenticate. We do this inside your FastAPI dependency.
+
+Here is the conceptual flow of how you will use it in your upcoming `get_current_user` dependency:
+
+```python
+# Conceptual snippet for your auth dependency
+from db_components.rls_utils import current_user_id_ctx_var
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    # 1. Decode the JWT to get the user ID
+    payload = verify_token(token, "access")
+    user_id = payload.get("sub")
+
+    # 2. TURN THE KEY: Set the ContextVar for the duration of this request
+    current_user_id_ctx_var.set(user_id)
+
+    # 3. Now, ANY query run by SQLAlchemy will automatically have the RLS unlocked!
+    user = db.query(User).filter(User.id == user_id).first()
+    return user
+```
+
+### Why this architecture is bulletproof:
+By attaching this to the SQLAlchemy `checkout` event, it is mathematically impossible for a developer on your team to "forget" to apply the security context. You don't have to manually write `db.execute("SET LOCAL...")` in every single one of your FastAPI route handlers. The infrastructure handles the tenant isolation invisibly and automatically.
+
+---
+
+Would you like me to write out the complete, production-ready `get_current_user` dependency (including the `HTTPBearer` scheme setup) so we can fully secure your API and start writing the protected portfolio endpoints?

@@ -5,6 +5,9 @@ from sqlalchemy.orm import sessionmaker
 from config import settings
 from constants import Environment
 
+# Just dropping this import at the top is enough to activate the listener for injecting current user!
+import db_components.rls_utils
+
 # Create the SQLAlchemy Engine
 # This manages the actual connection pool to the PostgreSQL container
 
