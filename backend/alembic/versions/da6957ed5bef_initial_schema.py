@@ -1,8 +1,8 @@
 """Initial schema
 
-Revision ID: ec02dda0adbe
+Revision ID: da6957ed5bef
 Revises:
-Create Date: 2026-03-19 15:48:18.009753
+Create Date: 2026-03-21 10:05:16.378690
 
 """
 from typing import Sequence, Union
@@ -14,8 +14,9 @@ import db_components
 from constants import TableNames
 from db_components import rls_utils
 
+
 # revision identifiers, used by Alembic.
-revision: str = 'ec02dda0adbe'
+revision: str = 'da6957ed5bef'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

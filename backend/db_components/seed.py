@@ -1,5 +1,6 @@
 # docker compose exec backend env PYTHONPATH=. python db_components/seed.py
 import logging
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from db_components.database import SessionLocal
 from db_components.models import User, Portfolio, PortfolioItem
@@ -13,6 +14,11 @@ def seed_database():
     try:
         logger.info("Starting database seed process...")
 
+        # Need to set this as we currently don't have a current user and api user doesn't have
+        # admin rights which could have bypassed this limitation.
+        current_user_id = '00300000-0030-0300-3000-303000003000'
+        db.execute(text(f"SET app.current_user_id = '{current_user_id}'"))
+
         # 1. Create a Test User
         test_email = "developer@example.com"
         user = db.query(User).filter(User.email == test_email).first()
@@ -20,7 +26,7 @@ def seed_database():
         if not user:
             # Change 4: Passing 'password' as a kwarg here automatically triggers
             # the @password.setter logic defined in the User model, hashing it instantly.
-            user = User(email=test_email, password="SecurePassword123!")
+            user = User(id=current_user_id, email=test_email, password="SecurePassword123!")
             db.add(user)
 
             # Change 2: Flush to get the user.id without committing the transaction
