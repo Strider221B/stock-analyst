@@ -2093,3 +2093,538 @@ WITH CHECK (true);
 Once that is executed, your `seed.py` and your registration/login routes will work perfectly via the `api_user`, while still retaining the underlying RLS infrastructure.
 
 Would you like to move on to setting up the `GET /api/portfolios` endpoint now?
+
+## prompt 19
+
+Let's proceed with the next set of tasks:
+User Story 4: Frontend State Management & API Configuration
+As a frontend developer, I need a global state store and a configured HTTP client so that the React app knows if a user is logged in and automatically sends credentials with every request."
+* **Task 4.1:** Install state management and routing libraries in the `/frontend` directory (`npm install zustand react-router-dom axios`).
+* **Task 4.2:** Create an `api.ts` utility file and configure an Axios instance with `withCredentials: true` so that the browser automatically includes the HttpOnly cookie on all requests to the backend.
+* **Task 4.3:** Create an `authStore.ts` file using Zustand (or Context) with the state interface: `{ isAuthenticated: boolean, user: User | null }`.
+* **Task 4.4:** Implement a `login` action in the store that calls the Axios `POST /api/auth/login` endpoint and updates the state upon success.
+* **Task 4.5:** Implement a `logout` action in the store that calls the Axios `POST /api/auth/logout` endpoint and clears the state.
+* **Task 4.6:** Implement a `checkAuth` action that silently pings a protected backend route on initial app load to verify if a valid session cookie already exists.
+
+We are shifting gears to the frontend! Because we built a highly secure, dual-token authentication system on the backend, the frontend implementation requires a specific touch.
+
+We need to hold the short-lived **Access Token** in memory (inside Zustand) and attach it to the `Authorization` header. Meanwhile, the browser will automatically handle the **Refresh Token** (the HttpOnly cookie).
+
+To make this seamless, we will build an **Axios Interceptor**. This acts as a background traffic controller: if a user's access token expires while they are browsing, Axios will silently catch the `401 Unauthorized` error, pause the request, hit the `/refresh` endpoint using the cookie, get a new access token, and retry the original request without the user ever noticing.
+
+Here is how we set up this professional-grade frontend architecture.
+
+### Task 4.1: Installation
+
+Open a new terminal, navigate into your `/frontend` directory, and install the required packages:
+
+```bash
+cd frontend
+npm install zustand react-router-dom axios
+```
+
+### Task 4.2: The Axios Configuration (`api.ts`)
+
+Create a new folder `src/api` and add a file named `axios.ts`. This configuration sets up the base URL, ensures cookies are sent, and wires up the interceptor magic.
+
+```typescript
+// /frontend/src/api/axios.ts
+import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
+
+// 1. Create the base instance
+const api = axios.create({
+    // If using Vite, use import.meta.env. If Create React App, use process.env.
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    withCredentials: true, // Crucial: Tells the browser to send the HttpOnly cookie
+});
+
+// 2. Request Interceptor: Attach the Access Token to every outgoing request
+api.interceptors.request.use(
+    (config) => {
+        // We use .getState() to read from Zustand outside of a React component
+        const token = useAuthStore.getState().accessToken;
+        if (token && config.headers) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// 3. Response Interceptor: The Silent Refresh Mechanism
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+
+        // If the error is 401 (Unauthorized) and we haven't already retried this request...
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true;
+
+            try {
+                // Use a pristine axios instance to avoid infinite interceptor loops
+                const refreshResponse = await axios.post(
+                    `${api.defaults.baseURL}/api/auth/refresh`,
+                    {}, // empty body
+                    { withCredentials: true }
+                );
+
+                const newAccessToken = refreshResponse.data.access_token;
+                const user = refreshResponse.data.user;
+
+                // Update the Zustand store with the new token
+                useAuthStore.getState().setAccessToken(newAccessToken, user);
+
+                // Update the failed request's header and try again!
+                originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                return api(originalRequest);
+
+            } catch (refreshError) {
+                // If the refresh fails (e.g., cookie expired or token revoked), log them out completely
+                useAuthStore.getState().clearAuth();
+                return Promise.reject(refreshError);
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
+export default api;
+```
+
+### Tasks 4.3 – 4.6: The Zustand Store (`authStore.ts`)
+
+Create a new folder `src/store` and add `authStore.ts`. This store manages the global state and contains the actions for logging in, logging out, and checking the initial session on page load.
+
+```typescript
+// /frontend/src/store/authStore.ts
+import { create } from 'zustand';
+import api from '../api/axios';
+
+// Match this to your backend's UserResponse schema
+export interface User {
+    id: string;
+    email: string;
+}
+
+interface AuthState {
+    user: User | null;
+    isAuthenticated: boolean;
+    accessToken: string | null;
+    isAuthLoading: boolean; // Crucial for initial app load
+
+    // Actions
+    setAccessToken: (token: string, user: User) => void;
+    clearAuth: () => void;
+    checkAuth: () => Promise<void>;
+    login: (credentials: any) => Promise<void>;
+    logout: () => Promise<void>;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+    user: null,
+    isAuthenticated: false,
+    accessToken: null,
+    isAuthLoading: true, // Start true so we don't flash the login screen before checking cookies
+
+    // Internal helpers
+    setAccessToken: (token, user) => set({ accessToken: token, user, isAuthenticated: true }),
+    clearAuth: () => set({ accessToken: null, user: null, isAuthenticated: false, isAuthLoading: false }),
+
+    // Task 4.6: Check Auth on initial load
+    checkAuth: async () => {
+        try {
+            // Hit the refresh endpoint. If the browser has a valid HttpOnly cookie,
+            // the backend will return a fresh access token and user data.
+            const response = await api.post('/api/auth/refresh');
+            set({
+                accessToken: response.data.access_token,
+                user: response.data.user,
+                isAuthenticated: true,
+                isAuthLoading: false,
+            });
+        } catch (error) {
+            // No valid session cookie found. User is logged out.
+            get().clearAuth();
+        }
+    },
+
+    // Task 4.4: Login
+    login: async (credentials) => {
+        const response = await api.post('/api/auth/login', credentials);
+        set({
+            accessToken: response.data.access_token,
+            user: response.data.user,
+            isAuthenticated: true,
+        });
+    },
+
+    // Task 4.5: Logout
+    logout: async () => {
+        try {
+            // Tell the backend to revoke the refresh token and delete the cookie
+            await api.post('/api/auth/logout');
+        } catch (error) {
+            console.error("Backend logout failed, forcing local logout", error);
+        } finally {
+            // Always clear the local state, even if the backend call fails
+            get().clearAuth();
+        }
+    }
+}));
+```
+
+### Why `isAuthLoading` is crucial
+Notice the `isAuthLoading` boolean in the Zustand store. When a user first opens your React app or refreshes the page, the frontend memory is wiped completely clean. React has no idea if the user is logged in until `checkAuth()` finishes talking to the backend.
+
+If you don't use `isAuthLoading`, React will instantly see `isAuthenticated: false` and redirect a perfectly valid user back to the `/login` screen for half a second before snapping them back to their dashboard. We will use this flag in our routing to show a generic loading spinner while we check their session.
+
+---
+
+With the global state and API client fully configured, the frontend is officially wired up to your backend security architecture.
+
+Would you like to move on to creating the `<ProtectedRoute>` wrapper component for React Router, or would you prefer to build the UI for the actual Login/Register pages next?
+
+## Prompt 20
+
+Few concerns:
+
+The "Race Condition" on Initial Load
+In checkAuth, you are calling api.post('/api/auth/refresh'). Since api uses your interceptor, and your interceptor triggers a refresh on a 401, you might end up with double refresh calls if the initial checkAuth fails.
+
+Request Queuing (The "Multiple Tab/Request" Bug)
+Imagine your app loads and fires 3 API calls at once (e.g., getProfile, getPortfolios, getSettings). All 3 return 401. Implement a "refreshing" flag and a queue. 
+
+Zustand Store Circular Dependency
+You are importing api into authStore.ts, and authStore into api/axios.ts. This is a circular dependency.
+
+isAuthLoading Management
+In login, you don't update isAuthLoading. But if user land on the login page and log in, it stays true unless your clearAuth or checkAuth ran.
+
+api call in checkAuth
+Your interceptor is set to attach the accessToken to the header. If you are checking auth, you don't have a token yet.
+
+You have exceptional foresight. These are the exact four "gotchas" that plague frontend authentication systems in production, and catching them now saves countless hours of debugging elusive race conditions.
+
+You are entirely correct on all counts:
+1. **The Circular Dependency:** `authStore` relying on `api`, and `api` relying on `authStore` will eventually crash your bundler or cause undefined imports.
+2. **The `checkAuth` Paradox:** Using the intercepted `api` for auth-related calls creates infinite loops and attaches empty headers.
+3. **The `isAuthLoading` Bug:** Failing to explicitly set this in the login action leaves the UI in a frozen state.
+4. **The Concurrency Nightmare:** Without a queue, three simultaneous 401s will trigger three simultaneous refresh requests. If your backend uses token rotation or blocklists, the second and third requests will fail and accidentally log the user out.
+
+To fix all of this simultaneously, we separate concerns. **The Zustand store will use a raw, un-intercepted `axios` instance for all its auth-specific network calls.** The intercepted `api` instance will exclusively be used by your React components to fetch protected data (like portfolios).
+
+Here is the bulletproof implementation of both files.
+
+### 1. The Fixed Zustand Store (`authStore.ts`)
+
+By importing `axios` directly (instead of our custom `api`), we instantly break the circular dependency and fix the `checkAuth` race conditions.
+
+```typescript
+// /frontend/src/store/authStore.ts
+import { create } from 'zustand';
+import axios from 'axios';
+
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+export interface User {
+    id: string;
+    email: string;
+}
+
+interface AuthState {
+    user: User | null;
+    isAuthenticated: boolean;
+    accessToken: string | null;
+    isAuthLoading: boolean;
+
+    setAccessToken: (token: string, user: User) => void;
+    clearAuth: () => void;
+    checkAuth: () => Promise<void>;
+    login: (credentials: any) => Promise<void>;
+    logout: () => Promise<void>;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+    user: null,
+    isAuthenticated: false,
+    accessToken: null,
+    isAuthLoading: true,
+
+    setAccessToken: (token, user) => set({ accessToken: token, user, isAuthenticated: true }),
+
+    clearAuth: () => set({
+        accessToken: null,
+        user: null,
+        isAuthenticated: false,
+        isAuthLoading: false // Fixed: Ensure loading ends on clear
+    }),
+
+    checkAuth: async () => {
+        try {
+            // Fixed: Use raw axios to prevent interceptor loops on initial load
+            const response = await axios.post(
+                `${BASE_URL}/api/auth/refresh`,
+                {},
+                { withCredentials: true }
+            );
+
+            set({
+                accessToken: response.data.access_token,
+                user: response.data.user,
+                isAuthenticated: true,
+                isAuthLoading: false, // Fixed: End loading state
+            });
+        } catch (error) {
+            get().clearAuth();
+        }
+    },
+
+    login: async (credentials) => {
+        // Fixed: Use raw axios
+        const response = await axios.post(
+            `${BASE_URL}/api/auth/login`,
+            credentials,
+            { withCredentials: true }
+        );
+
+        set({
+            accessToken: response.data.access_token,
+            user: response.data.user,
+            isAuthenticated: true,
+            isAuthLoading: false, // Fixed: Update loading state upon manual login
+        });
+    },
+
+    logout: async () => {
+        try {
+            await axios.post(`${BASE_URL}/api/auth/logout`, {}, { withCredentials: true });
+        } finally {
+            get().clearAuth();
+        }
+    }
+}));
+```
+
+### 2. The Fixed Axios Interceptor (`api.ts`)
+
+Here we introduce a mutex (`isRefreshing`) and an array of pending promises (`failedQueue`). When multiple requests hit a 401 simultaneously, the first one locks the door, does the refresh, and then unlocks the door, resolving all queued requests with the new token.
+
+```typescript
+// /frontend/src/api/axios.ts
+import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
+
+const api = axios.create({
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    withCredentials: true,
+});
+
+// 1. Request Interceptor
+api.interceptors.request.use(
+    (config) => {
+        const token = useAuthStore.getState().accessToken;
+        if (token && config.headers) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// --- Concurrency / Queue Management Variables ---
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.forEach(prom => {
+        if (error) {
+            prom.reject(error);
+        } else if (token) {
+            prom.resolve(token);
+        }
+    });
+    failedQueue = [];
+};
+
+// 2. Response Interceptor
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+
+            // If another request is already fetching a new token, queue this one up!
+            if (isRefreshing) {
+                return new Promise(function(resolve, reject) {
+                    failedQueue.push({ resolve, reject });
+                }).then(token => {
+                    originalRequest.headers.Authorization = `Bearer ${token}`;
+                    return api(originalRequest);
+                }).catch(err => {
+                    return Promise.reject(err);
+                });
+            }
+
+            // Lock the refresh process
+            originalRequest._retry = true;
+            isRefreshing = true;
+
+            try {
+                // Use raw axios to hit the refresh endpoint
+                const refreshResponse = await axios.post(
+                    `${api.defaults.baseURL}/api/auth/refresh`,
+                    {},
+                    { withCredentials: true }
+                );
+
+                const newAccessToken = refreshResponse.data.access_token;
+                const user = refreshResponse.data.user;
+
+                // Update global state
+                useAuthStore.getState().setAccessToken(newAccessToken, user);
+
+                // Release the queue and let pending requests proceed with the new token
+                processQueue(null, newAccessToken);
+
+                // Retry the original request
+                originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                return api(originalRequest);
+
+            } catch (refreshError) {
+                // If refresh fails, reject all queued requests and log the user out
+                processQueue(refreshError, null);
+                useAuthStore.getState().clearAuth();
+                return Promise.reject(refreshError);
+            } finally {
+                // Unlock the process
+                isRefreshing = false;
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
+export default api;
+```
+
+With these updates, your frontend architecture is resilient enough to handle race conditions, strict dependency trees, and highly concurrent loading screens without dropping a single session.
+
+Would you like to move on to creating the `<ProtectedRoute>` wrapper component for React Router, so we can put this store to use?
+
+## Prompt 21
+
+One Small Tweak for "CheckAuth"
+we do
+} catch (error) {
+    get().clearAuth();
+}
+in checkAuth method
+
+Check if the error is actually a 401 before clearing, or just ensure
+your backend returns a clean "null" state if no cookie is present to
+avoid "Error" noise in your browser logs.
+
+You have a fantastic eye for detail. The "red console error on initial load" is a classic annoyance in Single Page Applications (SPAs) using HttpOnly cookies.
+
+However, there is a very specific architectural reason why we should keep the backend returning a `401 Unauthorized` instead of a clean `200 OK` with a `null` state.
+
+If we change the backend `/refresh` route to return a `200 OK` when the cookie is missing, **we break the Axios Interceptor we just wrote.** Our interceptor is explicitly listening for the `/refresh` call to fail (via a rejected promise) so it knows to flush the queue and log the user out. If it receives a `200 OK` with empty data, it will try to attach `Bearer undefined` to the queued requests and proceed, causing cascading failures.
+
+Standard REST convention dictates that a missing authentication token on an authentication endpoint should indeed throw a `401`. The red network error in the browser console on initial load is a widely accepted industry tradeoff for the security of HttpOnly cookies (since JavaScript cannot check if the cookie exists before making the request).
+
+We can, however, write a much smarter `catch` block in our Zustand store to handle this gracefully in our application logic, distinguishing between an expected "not logged in" state and an actual server crash.
+
+### The Refined `checkAuth` Catch Block
+
+Update your `checkAuth` method in `/frontend/src/store/authStore.ts`:
+
+```typescript
+    checkAuth: async () => {
+        try {
+            const response = await axios.post(
+                `${BASE_URL}/api/auth/refresh`,
+                {},
+                { withCredentials: true }
+            );
+
+            set({
+                accessToken: response.data.access_token,
+                user: response.data.user,
+                isAuthenticated: true,
+                isAuthLoading: false,
+            });
+        } catch (error: any) {
+            // Check if it's a standard Axios error
+            if (axios.isAxiosError(error)) {
+                if (error.response?.status === 401) {
+                    // EXPECTED: User simply doesn't have a valid cookie. Silently clear.
+                    get().clearAuth();
+                    return;
+                }
+            }
+
+            // UNEXPECTED: The server is down (500) or the network is offline.
+            // We log this so you aren't flying blind during debugging.
+            console.error("Failed to reach backend during auth check:", error);
+            get().clearAuth();
+        }
+    },
+```
+
+By doing this, your application state resolves cleanly, and your error monitoring tools (like Sentry or DataDog) won't get polluted with fake errors, even if the browser's native network tab insists on highlighting the 401 in red.
+
+---
+
+Would you like to move on to creating the `<ProtectedRoute>` React Router component, so we can use this `isAuthLoading` state to show a loading spinner while this background check finishes?
+
+## Prompt 22
+
+Since isAuthLoading starts as true, you should ensure it set to false in every single path of your try/catch
+
+You are absolutely right. Relying on helper functions like `clearAuth()` to indirectly manage your loading state is a recipe for a frozen UI if someone ever modifies that helper function down the road.
+
+The most bulletproof way to handle loading states in asynchronous JavaScript is to use the `finally` block. It guarantees that the spinner stops, mathematically, 100% of the time, regardless of whether the `try` succeeds, fails, or throws a completely unexpected runtime exception before it even reaches the `catch`.
+
+Here is the final, iron-clad version of that `checkAuth` method:
+
+```typescript
+    checkAuth: async () => {
+        try {
+            const response = await axios.post(
+                `${BASE_URL}/api/auth/refresh`,
+                {},
+                { withCredentials: true }
+            );
+
+            set({
+                accessToken: response.data.access_token,
+                user: response.data.user,
+                isAuthenticated: true,
+                // Removed isAuthLoading from here, deferring it to finally block
+            });
+        } catch (error: any) {
+            if (axios.isAxiosError(error) && error.response?.status === 401) {
+                // EXPECTED: User simply doesn't have a valid cookie.
+                get().clearAuth();
+            } else {
+                // UNEXPECTED: Server down or network offline.
+                console.error("Failed to reach backend during auth check:", error);
+                get().clearAuth();
+            }
+        } finally {
+            // GUARANTEED: No matter what happens above, the app will unfreeze.
+            set({ isAuthLoading: false });
+        }
+    },
+```
+
+By pulling `isAuthLoading` out of the `try` and `catch` blocks entirely, the intent of the code becomes perfectly clear: the authentication check *must* end.
+
+---
+
+With the state management completely locked in and race conditions mitigated, the next logical step is to build the React component that actually consumes this `isAuthLoading` state.
+
+Would you like me to write the `<ProtectedRoute>` wrapper component for React Router, which will display a loading spinner while `checkAuth` runs, and then either render your Portfolios page or redirect the user to `/login`?
