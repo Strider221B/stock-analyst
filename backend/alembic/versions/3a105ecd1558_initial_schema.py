@@ -1,8 +1,8 @@
 """Initial schema
 
-Revision ID: da6957ed5bef
+Revision ID: 3a105ecd1558
 Revises:
-Create Date: 2026-03-21 10:05:16.378690
+Create Date: 2026-03-21 15:37:13.804769
 
 """
 from typing import Sequence, Union
@@ -11,12 +11,12 @@ from alembic import op
 import sqlalchemy as sa
 
 import db_components
+from config import settings
 from constants import TableNames
 from db_components import rls_utils
 
-
 # revision identifiers, used by Alembic.
-revision: str = 'da6957ed5bef'
+revision: str = '3a105ecd1558'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -57,6 +57,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_analysis_history_id'), 'analysis_history', ['id'], unique=False)
     op.create_index(op.f('ix_analysis_history_ticker'), 'analysis_history', ['ticker'], unique=False)
+    op.create_index(op.f('ix_analysis_history_user_id'), 'analysis_history', ['user_id'], unique=False)
     op.create_table('chat_sessions',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('context_ticker', sa.String(length=20), nullable=True),
@@ -67,6 +68,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_chat_sessions_id'), 'chat_sessions', ['id'], unique=False)
+    op.create_index(op.f('ix_chat_sessions_user_id'), 'chat_sessions', ['user_id'], unique=False)
     op.create_table('portfolios',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('name', sa.String(length=100), nullable=False),
@@ -81,15 +83,19 @@ def upgrade() -> None:
     op.create_index(op.f('ix_portfolios_id'), 'portfolios', ['id'], unique=False)
     op.create_index(op.f('ix_portfolios_user_id'), 'portfolios', ['user_id'], unique=False)
     op.create_table('chat_messages',
+    sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('session_id', sa.UUID(), nullable=False),
     sa.Column('sender_type', sa.Enum('USER', 'AI', name='chat_sender_enum', create_constraint=True), nullable=False),
     sa.Column('content', db_components.encrypted_text.EncryptedText(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.ForeignKeyConstraint(['session_id'], ['chat_sessions.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_chat_messages_id'), 'chat_messages', ['id'], unique=False)
+    op.create_index(op.f('ix_chat_messages_session_id'), 'chat_messages', ['session_id'], unique=False)
+    op.create_index(op.f('ix_chat_messages_user_id'), 'chat_messages', ['user_id'], unique=False)
     op.create_table('portfolio_items',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('portfolio_id', sa.Uuid(), nullable=False),
@@ -106,18 +112,18 @@ def upgrade() -> None:
     op.create_index(op.f('ix_portfolio_items_ticker'), 'portfolio_items', ['ticker'], unique=False)
     op.create_index(op.f('ix_portfolio_items_user_id'), 'portfolio_items', ['user_id'], unique=False)
     # ### end Alembic commands ###
-    for table in [TableNames.PORTFOLIOS, TableNames.PORTFOLIO_ITEMS]:
+    for table in [TableNames.PORTFOLIOS, TableNames.PORTFOLIO_ITEMS, TableNames.ANALYSIS_HISTORY, TableNames.CHAT_SESSIONS, TableNames.CHAT_MESSAGES]:
         for stmt in rls_utils.get_rls_statements(table, owner_column="user_id"):
             op.execute(stmt)
 
     # Setup for Users table where id is the owner
-    for stmt in rls_utils.get_rls_statements(TableNames.USERS, owner_column="id"):
+    for stmt in rls_utils.get_rls_statements(TableNames.USERS, owner_column="id", bypass_role=settings.api_user):
         op.execute(stmt)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    tables = [TableNames.PORTFOLIOS, TableNames.PORTFOLIO_ITEMS, TableNames.USERS]
+    tables = [TableNames.PORTFOLIOS, TableNames.PORTFOLIO_ITEMS, TableNames.ANALYSIS_HISTORY, TableNames.CHAT_SESSIONS, TableNames.CHAT_MESSAGES, TableNames.USERS]
     for table in tables:
         op.execute(f"DROP POLICY IF EXISTS {table}_isolation_policy ON {table};")
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY;")
@@ -127,13 +133,17 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_portfolio_items_portfolio_id'), table_name='portfolio_items')
     op.drop_index(op.f('ix_portfolio_items_id'), table_name='portfolio_items')
     op.drop_table('portfolio_items')
+    op.drop_index(op.f('ix_chat_messages_user_id'), table_name='chat_messages')
+    op.drop_index(op.f('ix_chat_messages_session_id'), table_name='chat_messages')
     op.drop_index(op.f('ix_chat_messages_id'), table_name='chat_messages')
     op.drop_table('chat_messages')
     op.drop_index(op.f('ix_portfolios_user_id'), table_name='portfolios')
     op.drop_index(op.f('ix_portfolios_id'), table_name='portfolios')
     op.drop_table('portfolios')
+    op.drop_index(op.f('ix_chat_sessions_user_id'), table_name='chat_sessions')
     op.drop_index(op.f('ix_chat_sessions_id'), table_name='chat_sessions')
     op.drop_table('chat_sessions')
+    op.drop_index(op.f('ix_analysis_history_user_id'), table_name='analysis_history')
     op.drop_index(op.f('ix_analysis_history_ticker'), table_name='analysis_history')
     op.drop_index(op.f('ix_analysis_history_id'), table_name='analysis_history')
     op.drop_table('analysis_history')

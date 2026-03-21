@@ -3,6 +3,7 @@ from sqlalchemy import String, DDL, event
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, validates, relationship
 
+from config import settings
 from constants import RelNames, TableNames
 from db_components.models.base import Base
 from db_components.models.id_mixin import IDMixin
@@ -76,4 +77,4 @@ class User(Base, IDMixin, TimestampMixin):
 # This is outside class because:
 # The Table Object: SQLAlchemy doesn't fully finalize the __table__ object (which the helper needs) until the class body has finished executing.
 # Clean Execution: Putting it outside ensures the User class is already in the global namespace so the event.listen can correctly reference User.__table__.
-rls_utils.attach_rls_to_model(User, owner_column="id")
+rls_utils.attach_rls_to_model(User, owner_column="id", bypass_role=settings.api_user)

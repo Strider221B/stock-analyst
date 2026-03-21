@@ -12,7 +12,7 @@ current_user_id_ctx_var: ContextVar[str | None] = ContextVar("current_user_id", 
 # ---------------------------------------------------------
 # 2. THE LOCKS: DDL Generators (Your existing code)
 # ---------------------------------------------------------
-def get_rls_statements(table_name: str, owner_column: str = "user_id"):
+def get_rls_statements(table_name: str, owner_column: str = "user_id", bypass_role = None):
     """
     Generates the standard 3-step RLS setup:
     1. Enable RLS
@@ -21,20 +21,30 @@ def get_rls_statements(table_name: str, owner_column: str = "user_id"):
     """
     policy_name = f"{table_name}_isolation_policy"
 
-    return [
+    statements = [
         f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY;",
         f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY;",
         f"DROP POLICY IF EXISTS {policy_name} ON {table_name};",
         f"CREATE POLICY {policy_name} ON {table_name} "
         f"USING ({owner_column} = current_setting('app.current_user_id', true)::uuid);"
     ]
+    # Add the bypass policy if a role was specified
+    if bypass_role:
+        bypass_policy_name = f"{table_name}_{bypass_role}_bypass"
+        statements.extend([
+            f"DROP POLICY IF EXISTS {bypass_policy_name} ON {table_name};",
+            f"CREATE POLICY {bypass_policy_name} ON {table_name} "
+            f"FOR ALL TO {bypass_role} USING (true) WITH CHECK (true);"
+        ])
 
-def attach_rls_to_model(model_class, owner_column: str = "user_id"):
+    return statements
+
+def attach_rls_to_model(model_class, owner_column: str = "user_id", bypass_role = None):
     """
     Attaches RLS DDL to the SQLAlchemy 'after_create' event.
     Use this inside your Model files.
     """
-    statements = get_rls_statements(model_class.__tablename__, owner_column)
+    statements = get_rls_statements(model_class.__tablename__, owner_column, bypass_role)
     for stmt in statements:
         event.listen(model_class.__table__, "after_create", DDL(stmt))
 
