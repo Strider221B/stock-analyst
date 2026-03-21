@@ -13,7 +13,7 @@ Commands for fresh restart of DB Container
 1. docker compose exec backend alembic upgrade head
 
 Check if database tables are setup correctly:
-1. docker exec -it stock_db_dev psql -U postgres -d [YOUR_DB_NAME]
+1. docker exec -it stock_db_dev psql -U [User_Name] -d [YOUR_DB_NAME]
 1. \dt
 1. SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname IN ('users', 'portfolios', 'portfolio_items');
 1. SELECT * FROM pg_policies WHERE tablename IN ('users', 'portfolios', 'portfolio_items');

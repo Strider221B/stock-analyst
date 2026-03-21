@@ -1633,3 +1633,94 @@ By attaching this to the SQLAlchemy `checkout` event, it is mathematically impos
 ---
 
 Would you like me to write out the complete, production-ready `get_current_user` dependency (including the `HTTPBearer` scheme setup) so we can fully secure your API and start writing the protected portfolio endpoints?
+
+## Prompt 14
+
+It seems the db user has super user status set, will this override all the row level checks?
+
+equity_analysis_db=# SELECT rolname, rolsuper FROM pg_roles WHERE rolname = 'local_admin';
+   rolname   | rolsuper
+-------------+----------
+ local_admin | t
+
+equity_analysis_db=# SELECT * FROM portfolios;
+               user_id                |        name         | account_type  |                  id                  |          created_at           |          updated_at
+--------------------------------------+---------------------+---------------+--------------------------------------+-------------------------------+-------------------------------
+ 75ee176d-cb4b-42c8-8bac-d01a622e80e3 | NSE Core Holdings   | DOMESTIC      | 420b0191-72ec-4d59-a7c6-410649704c7a | 2026-03-20 04:00:39.294645+00 | 2026-03-20 04:00:39.294645+00
+ 75ee176d-cb4b-42c8-8bac-d01a622e80e3 | Fidelity RSU & ESPP | INTERNATIONAL | 261e0efc-c1cd-4150-b42c-e75cb9d4b6bf | 2026-03-20 04:00:39.294645+00 | 2026-03-20 04:00:39.294645+00
+
+I can see the tables, even though:
+SELECT rolname, rolbypassrls FROM pg_roles WHERE rolname = 'local_admin';
+   rolname   | rolbypassrls
+-------------+--------------
+ local_admin | f
+
+equity_analysis_db=# \d portfolios
+                        Table "public.portfolios"
+    Column    |           Type           | Collation | Nullable | Default
+--------------+--------------------------+-----------+----------+---------
+ user_id      | uuid                     |           | not null |
+ name         | character varying(100)   |           | not null |
+ account_type | account_type_enum        |           | not null |
+ id           | uuid                     |           | not null |
+ created_at   | timestamp with time zone |           | not null | now()
+ updated_at   | timestamp with time zone |           | not null | now()
+Indexes:
+    "portfolios_pkey" PRIMARY KEY, btree (id)
+    "ix_portfolios_id" btree (id)
+    "ix_portfolios_user_id" btree (user_id)
+    "uq_portfolio_id_user_id" UNIQUE CONSTRAINT, btree (id, user_id)
+Foreign-key constraints:
+    "portfolios_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+Referenced by:
+    TABLE "portfolio_items" CONSTRAINT "portfolio_items_portfolio_id_user_id_fkey" FOREIGN KEY (portfolio_id, user_id) REFERENCES portfolios(id, user_id) ON DELETE CASCADE
+Policies (forced row security enabled):
+    POLICY "portfolios_isolation_policy"
+      USING ((user_id = (current_setting('app.current_user_id'::text, true))::uuid))
+
+Yes, absolutely. **Superuser status (`rolsuper = t`) completely overrides all Row-Level Security checks.** You have correctly identified the culprit. In PostgreSQL, a superuser is the absolute highest level of privilege. It bypasses *all* permission checks in the database, including RLS policies, regardless of how strictly you have locked down the table.
+
+Here is why your diagnostic queries showed what they did:
+
+* **`rolbypassrls = f`**: This flag is specifically designed for *non-superusers*. It allows you to grant a backup utility (like `pg_dump`) the ability to bypass RLS to back up all data without giving that utility full, destructive superuser control over the entire database. Because your user is already a superuser, Postgres ignores this flag entirely.
+* **`FORCE ROW LEVEL SECURITY`**: By default, the *owner* of a table also bypasses RLS on their own table. `FORCE ROW LEVEL SECURITY` tells Postgres, "Apply RLS even to the table owner." However, it *still* does not apply to superusers.
+
+### Why this happens in local development
+When you spin up a standard Postgres Docker container and use the `POSTGRES_USER` environment variable, it creates that user as a superuser. So, when you log into `psql` or run your FastAPI app locally using `local_admin`, RLS is effectively disabled.
+
+### How to test your RLS right now
+To prove your RLS policy is actually working flawlessly, you need to query the table as a standard, unprivileged user.
+
+You can run this quick test directly inside your current `psql` session:
+
+```sql
+-- 1. Create a dummy non-superuser
+CREATE ROLE test_user WITH LOGIN PASSWORD 'password';
+
+-- 2. Give them basic read access so Postgres doesn't block them at the table level
+GRANT USAGE ON SCHEMA public TO test_user;
+GRANT SELECT ON portfolios TO test_user;
+
+-- 3. Switch your current session to become this user
+SET ROLE test_user;
+
+-- 4. Try the query again
+SELECT * FROM portfolios;
+-- Result: (0 rows) -> RLS is working!
+
+-- 5. Inject the session variable to "unlock" the RLS
+SET LOCAL app.current_user_id = '75ee176d-cb4b-42c8-8bac-d01a622e80e3';
+SELECT * FROM portfolios;
+-- Result: (2 rows) -> The exact portfolios for that user appear!
+
+-- 6. Switch back to your admin user when done
+RESET ROLE;
+```
+
+### The Production Fix
+For your FastAPI backend, it is a major security risk to connect to the database using a superuser account in production.
+
+You will want to maintain `local_admin` for running database migrations (Alembic) and emergency maintenance, but you should create a scoped application user (e.g., `api_user`) that only has `SELECT`, `INSERT`, `UPDATE`, and `DELETE` privileges. When FastAPI connects as `api_user`, your RLS policies will enforce perfectly.
+
+Would you like me to write out the SQL script to generate this restricted `api_user` and show you how to configure your backend to use it, or do you want to move on to the `get_current_user` FastAPI dependency now that you know the database locks are working?
+

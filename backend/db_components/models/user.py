@@ -16,6 +16,15 @@ EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
 class User(Base, IDMixin, TimestampMixin):
     __tablename__ = TableNames.USERS
 
+    _PASSWORD_FIELD_NAME = 'password'
+
+    def __init__(self, **kwargs):
+        if self._PASSWORD_FIELD_NAME in kwargs:
+            self.password = kwargs.pop(self._PASSWORD_FIELD_NAME)
+
+        # Pass the remaining valid kwargs to the parent constructor
+        super().__init__(**kwargs)
+
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     _password_hash: Mapped[str] = mapped_column("password_hash", String(1024), nullable=False)
 
