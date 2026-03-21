@@ -40,6 +40,8 @@ def get_db():
         yield db
     finally:
         db.close()
+        # Reset the ContextVar after the request is done
+        db_components.rls_utils.current_user_id_ctx_var.set(None)
 
 def set_tenant_context(session, user_id: str):
     """

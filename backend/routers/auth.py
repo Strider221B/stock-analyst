@@ -6,12 +6,13 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 # Imported the new MessageResponse schema
 from apis.schemas import UserCreate, UserLogin, LoginResponse, MessageResponse
-from db_components.models.token_block_list import TokenBlocklist
-from db_components.security import create_refresh_token, create_access_token, check_needs_rehash, DUMMY_HASH, verify_password, verify_token
 from config import settings
 from constants import Environment
+from db_components.models.token_block_list import TokenBlocklist
+from db_components.security import create_refresh_token, create_access_token, check_needs_rehash, DUMMY_HASH, verify_password, verify_token
 from db_components.models import User
 from db_components.database import get_db
+from routers.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/api/auth",
@@ -133,7 +134,8 @@ async def logout(
     response: Response,
     # Grab the cookie directly from the request
     refresh_token: str | None = Cookie(default=None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Logs the user out and revokes the refresh token."""
 
@@ -172,7 +174,8 @@ async def logout(
 @router.post("/refresh", response_model=LoginResponse)
 async def refresh_access_token(
     refresh_token: str | None = Cookie(default=None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Issues a new short-lived access token using a valid refresh cookie."""
     if not refresh_token:
