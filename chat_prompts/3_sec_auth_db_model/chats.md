@@ -1724,3 +1724,86 @@ You will want to maintain `local_admin` for running database migrations (Alembic
 
 Would you like me to write out the SQL script to generate this restricted `api_user` and show you how to configure your backend to use it, or do you want to move on to the `get_current_user` FastAPI dependency now that you know the database locks are working?
 
+## Prompt 15
+
+yes, go ahead write out the SQL script to generate this restricted api_user and show you how to configure your backend to use it
+
+This is exactly how enterprise database security is handled. By adopting the **Principle of Least Privilege**, your FastAPI application will only have the exact permissions it needs to serve users, and absolutely nothing more. If a vulnerability is ever discovered in your application code, the attacker cannot drop tables, alter schemas, or bypass your Row-Level Security.
+
+Here is the exact SQL script to run, followed by how to split your database URLs so Alembic can still run migrations as an admin while your app runs as the restricted user.
+
+### 1. The SQL Script (Run as `local_admin`)
+
+Open your `psql` terminal (or pgAdmin/DBeaver) while connected as your `local_admin` superuser to the `equity_analysis_db` database, and execute this block:
+
+```sql
+-- 1. Create the new restricted user
+CREATE USER api_user WITH ENCRYPTED PASSWORD 'secure_api_password_123!';
+
+-- 2. Grant basic connection rights to the database
+GRANT CONNECT ON DATABASE equity_analysis_db TO api_user;
+
+-- 3. Grant usage on the public schema (where your tables live)
+GRANT USAGE ON SCHEMA public TO api_user;
+
+-- 4. Grant specific CRUD privileges on all EXISTING tables
+-- (This includes users, portfolios, portfolio_items, etc.)
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO api_user;
+
+-- 5. Grant permissions on sequences (Required if you ever use SERIAL/auto-incrementing IDs)
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO api_user;
+
+-- 6. FUTURE-PROOFING: Ensure the api_user gets these exact same rights
+-- automatically whenever you create a new table in the future via Alembic.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO api_user;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT USAGE, SELECT ON SEQUENCES TO api_user;
+```
+
+### 2. Splitting Your Database URLs
+
+Because `api_user` cannot create or alter tables, your Alembic migrations will fail if they try to use it. We need to split your database connection strings in your `.env` file so your app and your migration tool use different credentials.
+
+Open your root `.env` file and update your database variables:
+
+```env
+# /root/.env
+
+# The Admin URL (Used ONLY by Alembic for structural changes)
+ADMIN_DATABASE_URL=postgresql://local_admin:your_admin_password@localhost:5432/equity_analysis_db
+
+# The Application URL (Used by FastAPI inside the Docker container)
+# Note: In Docker, the host is usually the name of the database service (e.g., 'db' or 'postgres')
+DATABASE_URL=postgresql://api_user:secure_api_password_123!@db:5432/equity_analysis_db
+```
+
+### 3. Update Your Backend Configuration
+
+Finally, ensure your backend reads the correct URL for its runtime operations.
+
+In your `/backend/config.py` (where your Pydantic `Settings` class lives), ensure your `database_url` is pointing to the `api_user` string.
+
+```python
+# /backend/config.py
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    # This will pull the restricted api_user URL from the .env file
+    database_url: str
+
+    # ... your other settings ...
+```
+
+For Alembic, simply ensure your `alembic.ini` or `env.py` script is explicitly reading the `ADMIN_DATABASE_URL` from the environment when it runs its migrations.
+
+---
+
+### The Result
+Now, when you spin up your Docker containers, FastAPI connects as `api_user`. Because `api_user` is a standard, unprivileged account, **PostgreSQL will ruthlessly enforce the Row-Level Security policies you wrote.**
+
+Your database is officially locked down, optimized, and ready for production traffic.
+
+Shall we wrap up the backend architecture by writing the `get_current_user` dependency in `/backend/routers/auth.py` so we can finally start requesting those seeded portfolios from the frontend?
+

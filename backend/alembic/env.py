@@ -34,7 +34,7 @@ target_metadata = Base.metadata
 def get_url():
     """Extracts the secure, dynamically generated DB URL from Pydantic."""
     # Convert the SQLAlchemy URL object to a string for Alembic
-    return str(settings.get_database_url())
+    return str(settings.get_admin_database_url())
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""

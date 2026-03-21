@@ -14,10 +14,13 @@ class Settings(BaseSettings):
     frontend_port: int = 5173
 
     # Database Config
-    postgres_user: str
-    postgres_password: str
+    api_user: str
+    api_user_password: str
     postgres_db: str
     database_url: str | None = None
+    admin_user: str
+    admin_password: str
+    admin_database_url: str | None = None
 
     pool_size: int = 5
     max_overflow: int = 10
@@ -50,8 +53,21 @@ class Settings(BaseSettings):
             return self.database_url
         return URL.create(
             drivername="postgresql",
-            username=self.postgres_user,
-            password=self.postgres_password,
+            username=self.api_user,
+            password=self.api_user_password,
+            host="db",
+            port=5432,
+            database=self.postgres_db
+        )
+
+    def get_admin_database_url(self) -> str:
+        """Construct the Admin DB URL if it wasn't explicitly provided."""
+        if self.admin_database_url:
+            return self.admin_database_url
+        return URL.create(
+            drivername="postgresql",
+            username=self.admin_user,
+            password=self.admin_password,
             host="db",
             port=5432,
             database=self.postgres_db
