@@ -2628,3 +2628,121 @@ By pulling `isAuthLoading` out of the `try` and `catch` blocks entirely, the int
 With the state management completely locked in and race conditions mitigated, the next logical step is to build the React component that actually consumes this `isAuthLoading` state.
 
 Would you like me to write the `<ProtectedRoute>` wrapper component for React Router, which will display a loading spinner while `checkAuth` runs, and then either render your Portfolios page or redirect the user to `/login`?
+
+## Prompt 23
+
+Can you update the axios.ts file for these potential issues:
+
+1. Missing _retry check on the Queue: When a request is pulled from the failedQueue, you should mark it as a retry. Ensures that if the retried request fails again, it doesn't try to refresh a second time (which would cause an infinite loop).
+
+2. In your response interceptor, you use const refreshResponse = await axios.post(`${api.defaults.baseURL}/api/auth/refresh`, ...);
+If api.defaults.baseURL is ever undefined or a relative path (like /api), this string concatenation might break. Use api.getUri() is possible.
+
+You are absolutely right on both counts. These are exactly the kind of microscopic edge cases that cause silent, intermittent bugs in production environments.
+
+1. **The Infinite Queue Loop:** If a queued request fires with a newly fetched token, but that token is somehow instantly invalid (e.g., an admin just hit a "revoke all sessions" button on the backend), the queued request hits a `401`, isn't marked with `_retry`, and triggers *another* refresh attempt, creating an infinite loop that crashes the browser tab.
+2. **The Brittle URL:** String concatenation with base URLs is a notorious trap. If `VITE_API_URL` is configured with a trailing slash in production but not locally, `http://domain.com//api/auth/refresh` can cause unexpected routing behavior or CORS failures.
+
+Here is the hardened version of `axios.ts` incorporating both of your fixes.
+
+### The Hardened `axios.ts`
+
+To solve the URL issue, we can simply pass the `baseURL` dynamically into the raw `axios.post` configuration object. Axios handles the path resolution safely under the hood, regardless of trailing slashes or undefined states.
+
+```typescript
+// /frontend/src/api/axios.ts
+import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
+
+const api = axios.create({
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    withCredentials: true,
+});
+
+// 1. Request Interceptor
+api.interceptors.request.use(
+    (config) => {
+        const token = useAuthStore.getState().accessToken;
+        if (token && config.headers) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// --- Queue Management ---
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: any) => void }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.forEach(prom => {
+        if (error) prom.reject(error);
+        else if (token) prom.resolve(token);
+    });
+    failedQueue = [];
+};
+
+// 2. Response Interceptor
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+
+            if (isRefreshing) {
+                return new Promise(function(resolve, reject) {
+                    failedQueue.push({ resolve, reject });
+                }).then(token => {
+                    // FIX 1: Explicitly mark this queued request as a retry
+                    // so it doesn't trigger another refresh if it fails again.
+                    originalRequest._retry = true;
+                    originalRequest.headers.Authorization = `Bearer ${token}`;
+                    return api(originalRequest);
+                }).catch(err => {
+                    return Promise.reject(err);
+                });
+            }
+
+            originalRequest._retry = true;
+            isRefreshing = true;
+
+            try {
+                // FIX 2: Let Axios safely resolve the path using the baseURL config
+                const refreshResponse = await axios.post(
+                    '/api/auth/refresh',
+                    {},
+                    {
+                        baseURL: api.defaults.baseURL,
+                        withCredentials: true
+                    }
+                );
+
+                const newAccessToken = refreshResponse.data.access_token;
+                const user = refreshResponse.data.user;
+
+                useAuthStore.getState().setAccessToken(newAccessToken, user);
+                processQueue(null, newAccessToken);
+
+                originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                return api(originalRequest);
+
+            } catch (refreshError) {
+                processQueue(refreshError, null);
+                useAuthStore.getState().clearAuth();
+                return Promise.reject(refreshError);
+            } finally {
+                isRefreshing = false;
+            }
+        }
+        return Promise.reject(error);
+    }
+);
+
+export default api;
+```
+
+This configuration is now enterprise-grade. It handles concurrency, prevents infinite loops, avoids circular dependencies, and manages URL structures safely.
+
+Would you like to move on to creating the `<ProtectedRoute>` React component so we can finally utilize the global `isAuthLoading` state to protect your application's routing?

@@ -25,11 +25,8 @@ let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: any) 
 
 const processQueue = (error: any, token: string | null = null) => {
     failedQueue.forEach(prom => {
-        if (error) {
-            prom.reject(error);
-        } else if (token) {
-            prom.resolve(token);
-        }
+        if (error) prom.reject(error);
+        else if (token) prom.resolve(token);
     });
     failedQueue = [];
 };
@@ -47,6 +44,9 @@ api.interceptors.response.use(
                 return new Promise(function(resolve, reject) {
                     failedQueue.push({ resolve, reject });
                 }).then(token => {
+                    // Explicitly mark this queued request as a retry
+                    // so it doesn't trigger another refresh if it fails again.
+                    originalRequest._retry = true;
                     originalRequest.headers.Authorization = `Bearer ${token}`;
                     return api(originalRequest);
                 }).catch(err => {
@@ -59,11 +59,15 @@ api.interceptors.response.use(
             isRefreshing = true;
 
             try {
-                // Use raw axios to hit the refresh endpoint
+                // Use raw axios to hit the refresh endpoint,
+                // Let Axios safely resolve the path using the baseURL config
                 const refreshResponse = await axios.post(
-                    `${api.defaults.baseURL}/api/auth/refresh`,
+                    '/api/auth/refresh',
                     {},
-                    { withCredentials: true }
+                    {
+                        baseURL: api.defaults.baseURL,
+                        withCredentials: true
+                    }
                 );
 
                 const newAccessToken = refreshResponse.data.access_token;
