@@ -3285,3 +3285,192 @@ export default defineConfig({
 Once you run those installations and verify the path alias, your IDE should immediately light up green, and the `LoginForm` and `RegisterForm` will compile perfectly.
 
 Let me know if the CLI throws any weird errors during the setup, or if you're ready to spin up the dev server and see the UI!
+
+## Prompt 27
+
+let's spin up the dev server and spin up the ui
+
+This is the best part! Let’s get everything running and see that authentication flow in action.
+
+Here is your pre-flight checklist and the commands to spin it all up.
+
+### 1. Ensure the Backend is Running
+Since our frontend needs to talk to the API, make sure your Docker containers are still happily humming along in the background. If you stopped them earlier, fire them up from the root directory of your project:
+```bash
+docker compose up -d
+```
+
+### 2. Start the React Dev Server - Not required!
+Open a new terminal, navigate to your `/frontend` folder, and start the Vite development server:
+```bash
+cd frontend
+npm run dev
+```
+
+Vite is lightning fast. Within a second, it should give you a local URL, typically **`http://localhost:5173`**.
+
+### 3. The "Test Flight" Checklist
+Open that URL in your browser. Here is exactly what you should experience if our architecture is wired up perfectly:
+
+1. **The Bounce:** You hit `http://localhost:5173/`. For a split second, you might see the loading spinner (from `isAuthLoading`), and then the URL should instantly snap to `http://localhost:5173/login`.
+2. **Registration:** Click the "Register" link. Create a brand new user.
+   * *Test the validation:* Try putting in a 3-character password or mismatched passwords to see your Zod error messages pop up.
+3. **The Handoff:** Once you register successfully, the backend will set the `HttpOnly` cookie, Zustand will grab the Access Token, and React Router will instantly teleport you to the `/dashboard` showing your "Welcome to your Dashboard!" dummy text.
+4. **The Refresh Test (Crucial):** While on the dashboard, hit the refresh button on your browser.
+   * The screen will clear.
+   * The `Loader2` spinner will appear.
+   * Zustand will silently hit the `/refresh` endpoint.
+   * The backend will read the HttpOnly cookie and issue a new Access Token.
+   * The spinner will disappear, and you will remain on the dashboard without being kicked back to the login screen.
+
+### 4. Peek Under the Hood
+If you want to see the dual-token architecture physically working, open your browser's **Developer Tools (F12)**:
+* Go to the **Application** tab (or **Storage** in Firefox).
+* Look under **Cookies**. You will see your `refresh_token` sitting there, fully secured and inaccessible to JavaScript.
+* Go to the **Network** tab, refresh the page, and look at the `refresh` network request to see your fresh `access_token` arriving in the JSON response.
+
+Let me know once you've taken it for a spin! If you get any CORS errors or weird routing behaviors, paste the error here and we will squash it. If it runs green, we can move straight into building the real Dashboard to fetch those portfolios!
+
+## Prompt 28
+
+User registration fails with message - "Registration failed. Email may be in use."
+
+Browser console logs:
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at http://api/auth/refresh. (Reason: CORS request did not succeed). Status code: (null). 3
+Failed to reach backend during auth check: AxiosError: Network Error
+    _AxiosError AxiosError.js:32
+    handleError xhr.js:122
+ authStore.ts:66:21
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at http://api/auth/refresh. (Reason: CORS request did not succeed). Status code: (null).
+Failed to reach backend during auth check: AxiosError: Network Error
+    _AxiosError AxiosError.js:32
+    handleError xhr.js:122
+ authStore.ts:66:21
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at http://api/auth/register. (Reason: CORS request did not succeed). Status code: (null).
+
+Ah, the classic Docker networking and CORS trap! The error logs you provided contain the exact smoking gun we need to fix this.
+
+Look very closely at the URL your browser is trying to hit:
+`reading the remote resource at http://api/auth/refresh`
+
+Your browser is literally trying to send a request to a server named `api`.
+
+Here is what is happening: In Docker Compose, containers can talk to each other using their service names (like `http://api` or `http://backend`). However, your React code doesn't execute inside the Docker container; **it executes inside your physical web browser on your host machine.** Your browser has no idea what `http://api` is, so the request fails instantly, and the browser generically flags it as a CORS/Network error.
+
+Your `docker-compose.yml` reveals exactly what happened, and it actually highlights a fantastic architectural decision you made:
+
+```yaml
+# React will call itself (localhost:5173) and Vite will proxy to the backend
+- VITE_API_URL=/
+```
+
+This is the **"Reverse Proxy Pattern."** It is the most robust way to build a frontend because it perfectly mirrors how a production Nginx server works. By having the browser talk *only* to itself (origin to origin), **you completely bypass browser CORS restrictions.** However, the reason it failed with that `http://api` error earlier is because while you set the environment variable, you haven't actually told Vite *how* to proxy the requests to the Docker backend.
+
+Here is exactly what you need to change to make your proxy pattern work flawlessly.
+
+### 1. Configure the Vite Proxy (`vite.config.ts`)
+We need to tell Vite's internal Node server: *"If you see a request starting with `/api`, don't look for a React component. Forward it to the backend container."*
+
+Open your `/frontend/vite.config.ts` and update it to this:
+
+```typescript
+import path from "path"
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    tailwindcss()
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  // ---------------------------------------------------------
+  // MANUALLY ADDED: Docker Network & HMR Configuration
+  // ---------------------------------------------------------
+  server: {
+    host: true, // Listen on all network interfaces (0.0.0.0)
+    port: 5173,
+    strictPort: true,
+    watch: {
+      usePolling: true, // Forces Vite to actively check for file changes over the Docker volume
+      interval: 1000,   // Check every 1 second
+    },
+    hmr: {
+      clientPort: 5173, // Ensures the browser's websocket connects to the mapped host port
+    },
+    // ---------------------------------------------------------
+    // THE FIX: Proxy API requests to the FastAPI backend
+    // ---------------------------------------------------------
+    proxy: {
+      '/api': {
+        // 'backend' is the service name from docker-compose.yml
+        // '8000' is the internal port FastAPI is listening on
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+    }
+  }
+})
+```
+
+### 2. Update your `main.py` CORS
+Your `main.py` CORS configuration is incredibly clean and dynamically injected via Pydantic settings. However, it misses one tiny edge case: `127.0.0.1` vs `localhost`.
+
+Browsers treat `http://127.0.0.1:5173` and `http://localhost:5173` as two completely different origins. Since we are using the proxy pattern, CORS *shouldn't* trigger in dev, but it's best practice to lock this down just in case someone accesses the API directly.
+
+Update the `_configure_cors` method in your `main.py`:
+
+```python
+    def _configure_cors(self):
+        origins = [
+            f"http://localhost:{settings.frontend_port}",
+            f"http://127.0.0.1:{settings.frontend_port}", # Added port here
+            "http://localhost",
+            "http://127.0.0.1"
+        ]
+
+        # If production, you might want to add your actual domain from settings
+        if settings.environment == Environment.PRODUCTION and hasattr(settings, 'domain'):
+            origins.append(f"https://{settings.domain}")
+
+        self._app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=CORSConfig.ALLOWED_METHODS,
+            allow_headers=CORSConfig.ALLOWED_HEADERS,
+        )
+```
+
+### 3. Ensure `axios.ts` Uses the Proxy
+Finally, double-check your `/frontend/src/api/axios.ts` file.
+
+Because `VITE_API_URL=/`, Axios might interpret that as a literal `/` character, or it might attach an extra slash when you do `${api.defaults.baseURL}/api/auth/refresh`.
+
+The safest, most resilient way to configure Axios when using a Vite proxy is to simply leave the `baseURL` empty. If `baseURL` is empty, Axios automatically defaults to the browser's current origin (e.g., `http://localhost:5173`), which is exactly what we want the proxy to intercept.
+
+```typescript
+// /frontend/src/api/axios.ts
+
+const api = axios.create({
+    // If VITE_API_URL is '/', fallback to an empty string so Axios uses the browser origin
+    baseURL: import.meta.env.VITE_API_URL === '/' ? '' : import.meta.env.VITE_API_URL,
+    withCredentials: true,
+});
+```
+
+### Next Steps
+Because you modified `vite.config.ts` (which is evaluated when the Node server starts), you need to restart your frontend container for the proxy rules to take effect.
+
+```bash
+docker compose restart frontend
+```
+
+Once that restarts, your React app will send requests to `http://localhost:5173/api/...`, Vite will quietly intercept them and route them to `http://backend:8000/api/...`, and all CORS and networking errors will be completely eliminated.
+

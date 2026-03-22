@@ -26,6 +26,18 @@ export default defineConfig({
     },
     hmr: {
       clientPort: 5173, // Ensures the browser's websocket connects to the mapped host port
+    },
+    // ---------------------------------------------------------
+    // THE FIX: Proxy API requests to the FastAPI backend
+    // ---------------------------------------------------------
+    proxy: {
+      '/api': {
+        // 'backend' is the service name from docker-compose.yml
+        // '8000' is the internal port FastAPI is listening on
+        target: process.env.PROXY_TARGET || 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
     }
   }
 })

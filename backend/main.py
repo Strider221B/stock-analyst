@@ -22,9 +22,15 @@ class AppCreator:
     def _configure_cors(self):
         origins = [
             f"http://localhost:{settings.frontend_port}",
+            f"http://127.0.0.1:{settings.frontend_port}",
             "http://127.0.0.1",
             "http://localhost"
         ]
+
+        # If production, you might want to add your actual domain from settings
+        if settings.environment == Environment.PRODUCTION and hasattr(settings, 'domain'):
+            origins.append(f"https://{settings.domain}")
+
         self._app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,

@@ -2,7 +2,9 @@
 import { create } from 'zustand';
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const _envUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// If the env is "/", make it an empty string to prevent "//api" concatenation
+const BASE_URL = _envUrl === '/' ? '' : _envUrl;
 
 export interface User {
     id: string;
@@ -73,7 +75,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const response = await axios.post(
             `${BASE_URL}/api/auth/login`,
             credentials,
-            { withCredentials: true }
+            {
+                // Explicitly tell FastAPI this is form data
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                withCredentials: true
+            }
         );
 
         set({

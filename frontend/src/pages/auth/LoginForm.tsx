@@ -36,7 +36,22 @@ export default function LoginForm() {
             await login(formData);
             navigate('/dashboard', { replace: true });
         } catch (err: any) {
-            setError(err.response?.data?.detail || "Invalid email or password");
+            const detail = err.response?.data?.detail;
+
+            // 1. If FastAPI sends a standard string error message (like 400 Bad Request)
+            if (typeof detail === 'string') {
+                setError(detail);
+            }
+            // 2. If FastAPI sends a Pydantic Validation Error array (422 Unprocessable Entity)
+            else if (Array.isArray(detail)) {
+                // Extracts just the readable messages and joins them with a comma
+                const messages = detail.map((e: any) => `${e.loc[e.loc.length - 1]}: ${e.msg}`);
+                setError(messages.join(', '));
+            }
+            // 3. Fallback for network crashes
+            else {
+                setError("An unexpected error occurred. Please try again.");
+            }
         }
     };
 

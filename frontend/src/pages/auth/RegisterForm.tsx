@@ -12,7 +12,13 @@ import { Label } from '@/components/ui/label';
 
 const registerSchema = z.object({
     email: z.string().email({ message: "Invalid email address" }),
-    password: z.string().min(8, { message: "Password must be at least 8 characters" }),
+    password: z.string()
+        .min(8, { message: "Password must be at least 8 characters" })
+        .max(128, { message: "Password cannot exceed 128 characters" })
+        .regex(/[A-Z]/, { message: "Must contain at least one uppercase letter" })
+        .regex(/[a-z]/, { message: "Must contain at least one lowercase letter" })
+        .regex(/\d/, { message: "Must contain at least one number" })
+        .regex(/[!@#$%^&*(),.?":{}|<>]/, { message: "Must contain at least one special character" }),
     confirmPassword: z.string()
 }).refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
@@ -33,7 +39,8 @@ export default function RegisterForm() {
     const onSubmit = async (data: RegisterFormValues) => {
         try {
             setError(null);
-            const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const _envUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const baseURL = _envUrl === '/' ? '' : _envUrl;
 
             // 1. Hit your backend register route
             await axios.post(`${baseURL}/api/auth/register`, {
@@ -50,7 +57,30 @@ export default function RegisterForm() {
             // 3. Send them to the app
             navigate('/dashboard', { replace: true });
         } catch (err: any) {
-            setError(err.response?.data?.detail || "Registration failed. Email may be in use.");
+
+            // Only log the full error in development mode
+            // Vite automatically injects a boolean flag called import.meta.env.DEV that is true when you run npm run dev
+            // and false when you run npm run build.
+            if (import.meta.env.DEV) {
+                console.error("Auth Failure:", err);
+            }
+
+            const detail = err.response?.data?.detail;
+
+            // 1. If FastAPI sends a standard string error message (like 400 Bad Request)
+            if (typeof detail === 'string') {
+                setError(detail);
+            }
+            // 2. If FastAPI sends a Pydantic Validation Error array (422 Unprocessable Entity)
+            else if (Array.isArray(detail)) {
+                // Extracts just the readable messages and joins them with a comma
+                const messages = detail.map((e: any) => `${e.loc[e.loc.length - 1]}: ${e.msg}`);
+                setError(messages.join(', '));
+            }
+            // 3. Fallback for network crashes
+            else {
+                setError("An unexpected error occurred. Please try again.");
+            }
         }
     };
 

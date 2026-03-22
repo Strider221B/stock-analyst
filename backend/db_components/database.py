@@ -53,20 +53,29 @@ def set_tenant_context(session, user_id: str):
         {"user_id": str(user_id)}
     )
 
-@event.listens_for(Engine, "checkin")
-def receive_checkin(dbapi_connection, connection_record):
+@event.listens_for(engine, "checkout")
+def receive_checkout(dbapi_connection, connection_record, connection_proxy):
     """
-    Runs when a connection is returned to the pool.
-    'RESET ALL' safely drops the RLS tenant context (app.current_user_id)
-    preventing data leakage, while preserving prepared statements
-    and cached query plans for optimal performance.
+    Fires every time a connection is pulled from the pool.
+    Guarantees a completely clean slate before any user data is queried.
     """
-    cursor = dbapi_connection.cursor()
+    if dbapi_connection is None:
+        return
+
     try:
-        cursor.execute("RESET ALL;")
-    except Exception as e:
-        # In the rare event the connection is completely broken,
-        # SQLAlchemy will handle the invalidation automatically.
+        cursor = dbapi_connection.cursor()
+        # Defensively clear the RLS state immediately upon checkout
+        cursor.execute("SELECT set_config('app.current_user_id', '', false);")
+        cursor.close()
+    except Exception:
+        # Silently ignore cleanup errors if the connection is dead;
+        # SQLAlchemy's ping will catch the dead connection shortly after.
         pass
     finally:
-        cursor.close()
+        # Crucial: Rollback any implicit transaction started by the cursor.execute()
+        # The RESET configuration survives the rollback, but the connection
+        # is returned to a clean, idle state for SQLAlchemy to use.
+        try:
+            dbapi_connection.rollback()
+        except Exception:
+            pass

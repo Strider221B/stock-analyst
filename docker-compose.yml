@@ -63,6 +63,7 @@ services:
     environment:
       # React will call itself (localhost:5173) and Vite will proxy to the backend
       - VITE_API_URL=/
+      - PROXY_TARGET=http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
