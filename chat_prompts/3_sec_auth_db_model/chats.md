@@ -3201,3 +3201,87 @@ export default App;
 With these routing edge cases resolved, your authentication flow is as bulletproof on the frontend as it is on the backend.
 
 Would you like to start building the actual `Dashboard` component now to fetch and display the `portfolios` we seeded into the database earlier?
+
+## Prompt 26
+
+in my login form, it says it can't find these:
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+
+Ah, that is completely my fault! I jumped the gun in the last step. I assumed you already had the `shadcn/ui` ecosystem and the form handling libraries installed, but we haven't actually set those up in your frontend yet.
+
+Those errors are happening because your project literally doesn't have the files for those UI components or the npm packages for the form validation.
+
+Here is the exact step-by-step to install and configure everything so those errors disappear instantly.
+
+### Step 1: Install the Form Libraries
+First, let's grab the tools that power the form state and validation. Run this in your `/frontend` directory:
+
+```bash
+npm install react-hook-form @hookform/resolvers zod
+```
+
+### Step 2: Initialize `shadcn/ui`
+`shadcn/ui` isn't a traditional component library that you install via npm (like Material UI). Instead, it's a CLI tool that physically copies the component code directly into your `src/components` folder so you can customize it.
+
+Run the initialization command in your `/frontend` directory:
+
+```bash
+npx shadcn-ui@latest init
+```
+
+It will ask you a few questions. You can usually just press **Enter** to accept the defaults for most of them:
+* **Style:** Default
+* **Base color:** Slate (or whatever you prefer)
+* **CSS variables:** Yes
+* **React Server Components:** No (since we are using standard Vite/React)
+
+### Step 3: Add the Specific Components
+Once initialized, you have to tell the CLI exactly which components you want to pull into your project. Run this command to fetch the three components we used in the auth forms:
+
+```bash
+npx shadcn-ui@latest add button input label
+```
+*Notice: This will create a `src/components/ui` folder and drop `button.tsx`, `input.tsx`, and `label.tsx` right inside it.*
+
+### Step 4: The `@/` Path Alias (The Final Gotcha)
+`shadcn/ui` relies heavily on absolute imports using the `@/` alias (which maps to your `src/` folder). If Vite and TypeScript don't know what `@/` means, those import errors will persist.
+
+**1. Check `tsconfig.json` (or `tsconfig.app.json`):**
+Ensure you have the `baseUrl` and `paths` configured under `compilerOptions`:
+```json
+    "compilerOptions": {
+      "baseUrl": ".",
+      "paths": {
+        "@/*": [
+          "./src/*"
+        ]
+      }
+      // ... other options
+    }
+```
+
+**2. Check `vite.config.ts`:**
+You need to tell Vite how to resolve that alias. You usually need the `path` module for this (you might need to run `npm install -D @types/node` if `__dirname` throws an error).
+```typescript
+import path from "path"
+import react from "@vitejs/plugin-react"
+import { defineConfig } from "vite"
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+})
+```
+
+---
+
+Once you run those installations and verify the path alias, your IDE should immediately light up green, and the `LoginForm` and `RegisterForm` will compile perfectly.
+
+Let me know if the CLI throws any weird errors during the setup, or if you're ready to spin up the dev server and see the UI!
