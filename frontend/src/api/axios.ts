@@ -1,83 +1,96 @@
-// /frontend/src/store/authStore.ts
-import { create } from 'zustand';
+// /frontend/src/api/axios.ts
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const api = axios.create({
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    withCredentials: true,
+});
 
-export interface User {
-    id: string;
-    email: string;
-}
-
-interface AuthState {
-    user: User | null;
-    isAuthenticated: boolean;
-    accessToken: string | null;
-    isAuthLoading: boolean;
-
-    setAccessToken: (token: string, user: User) => void;
-    clearAuth: () => void;
-    checkAuth: () => Promise<void>;
-    login: (credentials: any) => Promise<void>;
-    logout: () => Promise<void>;
-}
-
-export const useAuthStore = create<AuthState>((set, get) => ({
-    user: null,
-    isAuthenticated: false,
-    accessToken: null,
-    isAuthLoading: true,
-
-    setAccessToken: (token, user) => set({ accessToken: token, user, isAuthenticated: true }),
-
-    clearAuth: () => set({
-        accessToken: null,
-        user: null,
-        isAuthenticated: false,
-        isAuthLoading: false // Fixed: Ensure loading ends on clear
-    }),
-
-    checkAuth: async () => {
-        try {
-            // Fixed: Use raw axios to prevent interceptor loops on initial load
-            const response = await axios.post(
-                `${BASE_URL}/api/auth/refresh`,
-                {},
-                { withCredentials: true }
-            );
-
-            set({
-                accessToken: response.data.access_token,
-                user: response.data.user,
-                isAuthenticated: true,
-                isAuthLoading: false, // Fixed: End loading state
-            });
-        } catch (error) {
-            get().clearAuth();
+// 1. Request Interceptor
+api.interceptors.request.use(
+    (config) => {
+        const token = useAuthStore.getState().accessToken;
+        if (token && config.headers) {
+            config.headers.Authorization = `Bearer ${token}`;
         }
+        return config;
     },
+    (error) => Promise.reject(error)
+);
 
-    login: async (credentials) => {
-        // Fixed: Use raw axios
-        const response = await axios.post(
-            `${BASE_URL}/api/auth/login`,
-            credentials,
-            { withCredentials: true }
-        );
+// --- Concurrency / Queue Management Variables ---
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: any) => void }> = [];
 
-        set({
-            accessToken: response.data.access_token,
-            user: response.data.user,
-            isAuthenticated: true,
-            isAuthLoading: false, // Fixed: Update loading state upon manual login
-        });
-    },
-
-    logout: async () => {
-        try {
-            await axios.post(`${BASE_URL}/api/auth/logout`, {}, { withCredentials: true });
-        } finally {
-            get().clearAuth();
+const processQueue = (error: any, token: string | null = null) => {
+    failedQueue.forEach(prom => {
+        if (error) {
+            prom.reject(error);
+        } else if (token) {
+            prom.resolve(token);
         }
+    });
+    failedQueue = [];
+};
+
+// 2. Response Interceptor
+api.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+
+            // If another request is already fetching a new token, queue this one up!
+            if (isRefreshing) {
+                return new Promise(function(resolve, reject) {
+                    failedQueue.push({ resolve, reject });
+                }).then(token => {
+                    originalRequest.headers.Authorization = `Bearer ${token}`;
+                    return api(originalRequest);
+                }).catch(err => {
+                    return Promise.reject(err);
+                });
+            }
+
+            // Lock the refresh process
+            originalRequest._retry = true;
+            isRefreshing = true;
+
+            try {
+                // Use raw axios to hit the refresh endpoint
+                const refreshResponse = await axios.post(
+                    `${api.defaults.baseURL}/api/auth/refresh`,
+                    {},
+                    { withCredentials: true }
+                );
+
+                const newAccessToken = refreshResponse.data.access_token;
+                const user = refreshResponse.data.user;
+
+                // Update global state
+                useAuthStore.getState().setAccessToken(newAccessToken, user);
+
+                // Release the queue and let pending requests proceed with the new token
+                processQueue(null, newAccessToken);
+
+                // Retry the original request
+                originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+                return api(originalRequest);
+
+            } catch (refreshError) {
+                // If refresh fails, reject all queued requests and log the user out
+                processQueue(refreshError, null);
+                useAuthStore.getState().clearAuth();
+                return Promise.reject(refreshError);
+            } finally {
+                // Unlock the process
+                isRefreshing = false;
+            }
+        }
+        return Promise.reject(error);
     }
-}));
+);
+
+export default api;
