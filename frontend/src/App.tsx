@@ -1,23 +1,49 @@
-import { Button } from "@/components/ui/button"
+// /frontend/src/App.tsx
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore';
+
+// Layouts & Routes
+import AuthLayout from './components/layout/AuthLayout';
+import LoginForm from './pages/auth/LoginForm';
+import RegisterForm from './pages/auth/RegisterForm';
+import ProtectedRoute from './components/routing/ProtectedRoute';
+
+// Dummy Dashboard (To be built next)
+const Dashboard = () => <div className="p-8 text-2xl font-bold">Welcome to your Dashboard!</div>;
 
 function App() {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 p-4">
-      <div className="space-y-6 text-center">
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-50">
-          Frontend Foundation Active
-        </h1>
-        <p className="text-zinc-400">
-          Tailwind v4, path aliases, and UI components are fully compiled.
-        </p>
+    const checkAuth = useAuthStore((state) => state.checkAuth);
 
-        {/* The shadcn/ui component in action */}
-        <Button variant="default" size="lg">
-          Analyze Portfolio
-        </Button>
-      </div>
-    </div>
-  )
+    // Run exactly once when the React app mounts
+    useEffect(() => {
+        checkAuth();
+    }, [checkAuth]);
+
+    return (
+        <BrowserRouter>
+            <Routes>
+                {/* Public Auth Routes */}
+                <Route element={<AuthLayout />}>
+                    <Route path="/login" element={<LoginForm />} />
+                    <Route path="/register" element={<RegisterForm />} />
+                </Route>
+
+                {/* Protected App Routes */}
+                <Route element={<ProtectedRoute />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    {/* Add more protected routes here like /portfolios, /chat */}
+                </Route>
+
+                {/* FIX 1: Explicit Root and Catch-All Routing */}
+                {/* Send root traffic into the protected layout (which will redirect to login if needed) */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+                {/* Send 404 traffic to the public layout (which will redirect to dashboard if logged in) */}
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+        </BrowserRouter>
+    );
 }
 
-export default App
+export default App;

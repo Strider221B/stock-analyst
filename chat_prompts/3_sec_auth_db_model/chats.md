@@ -2746,3 +2746,458 @@ export default api;
 This configuration is now enterprise-grade. It handles concurrency, prevents infinite loops, avoids circular dependencies, and manages URL structures safely.
 
 Would you like to move on to creating the `<ProtectedRoute>` React component so we can finally utilize the global `isAuthLoading` state to protect your application's routing?
+
+## Prompt 24
+
+Let's go to the next set of tasks:
+User Story 5: Frontend Authentication UI & Routing
+As a user, I want secure login and registration pages, and I expect to be redirected if I try to access the dashboard without being logged in.
+* **Task 5.1:** Create a `LoginForm.tsx` component using shadcn/ui form elements, handling local input state and displaying error messages for invalid credentials.
+* **Task 5.2:** Create a `RegisterForm.tsx` component with password confirmation validation.
+* **Task 5.3:** Create an `AuthLayout.tsx` component to wrap the login and registration pages with a clean, centered UI design.
+* **Task 5.4:** Create a `ProtectedRoute.tsx` wrapper component that checks the `isAuthenticated` state from the store; if false, it redirects the user to the `/login` route using React Router's `Maps`.
+* **Task 5.5:** Configure `App.tsx` (or your main router file) to define the `/login` and `/register` public routes, and wrap the `/dashboard` route inside the `ProtectedRoute` component.
+
+We are at the exciting part: bringing the visual interface to life! You've built an incredibly robust backend and a highly resilient state management system. Now we just need to connect the UI.
+
+Before we dive into the code, I want to gently correct one minor terminology thing from Task 5.4: React Router doesn't use `Maps` for redirects. To seamlessly bounce an unauthenticated user away from a protected route, we use the `<Navigate />` component (specifically with the `replace` prop so they can't hit the "Back" button to return to the protected page).
+
+Since you mentioned `shadcn/ui`, I will assume you have it initialized and are using its standard `react-hook-form` and `zod` integration, as that is the standard and most robust way to build forms in that ecosystem.
+
+Here is the complete implementation for your authentication UI and routing.
+
+### Task 5.3: The Layout Wrapper (`AuthLayout.tsx`)
+Let's start with the container. This ensures your login and registration pages are perfectly centered on the screen with a clean, modern aesthetic.
+
+```tsx
+// /frontend/src/components/layout/AuthLayout.tsx
+import { Outlet } from 'react-router-dom';
+
+export default function AuthLayout() {
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+            <div className="w-full max-w-md space-y-8 bg-white p-8 rounded-xl shadow-lg border border-slate-100">
+                <div className="text-center">
+                    <h2 className="mt-6 text-3xl font-extrabold text-slate-900">
+                        Equity Analysis
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Secure your portfolio and chat data
+                    </p>
+                </div>
+                {/* The Outlet renders the LoginForm or RegisterForm depending on the route */}
+                <Outlet />
+            </div>
+        </div>
+    );
+}
+```
+
+### Task 5.1 & 5.2: The Forms (`LoginForm.tsx` & `RegisterForm.tsx`)
+We will use `zod` for strictly typed validation. Notice how `RegisterForm` uses `.refine()` to ensure the passwords match before the user can even hit the submit button.
+
+**Login Form:**
+```tsx
+// /frontend/src/pages/auth/LoginForm.tsx
+import { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useAuthStore } from '@/store/authStore';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+const loginSchema = z.object({
+    email: z.string().email({ message: "Invalid email address" }),
+    password: z.string().min(1, { message: "Password is required" }),
+});
+
+type LoginFormValues = z.infer<typeof loginSchema>;
+
+export default function LoginForm() {
+    const navigate = useNavigate();
+    const login = useAuthStore((state) => state.login);
+    const [error, setError] = useState<string | null>(null);
+
+    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginFormValues>({
+        resolver: zodResolver(loginSchema),
+    });
+
+    const onSubmit = async (data: LoginFormValues) => {
+        try {
+            setError(null);
+            // We format this as URLSearchParams to match FastAPI's OAuth2PasswordRequestForm
+            const formData = new URLSearchParams();
+            formData.append('username', data.email);
+            formData.append('password', data.password);
+
+            await login(formData);
+            navigate('/dashboard', { replace: true });
+        } catch (err: any) {
+            setError(err.response?.data?.detail || "Invalid email or password");
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {error && (
+                <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md border border-red-200">
+                    {error}
+                </div>
+            )}
+            <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" type="email" {...register('email')} />
+                {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" {...register('password')} />
+                {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
+            </div>
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? 'Signing in...' : 'Sign in'}
+            </Button>
+            <p className="text-center text-sm text-slate-600">
+                Don't have an account? <Link to="/register" className="text-blue-600 hover:underline">Register</Link>
+            </p>
+        </form>
+    );
+}
+```
+
+**Register Form:**
+*(Note: I am using raw axios here since registration is usually a one-off action that doesn't need to live in global state. Once registered, we immediately log them in.)*
+
+```tsx
+// /frontend/src/pages/auth/RegisterForm.tsx
+import { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
+import axios from 'axios';
+import { useAuthStore } from '@/store/authStore';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+const registerSchema = z.object({
+    email: z.string().email({ message: "Invalid email address" }),
+    password: z.string().min(8, { message: "Password must be at least 8 characters" }),
+    confirmPassword: z.string()
+}).refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+});
+
+type RegisterFormValues = z.infer<typeof registerSchema>;
+
+export default function RegisterForm() {
+    const navigate = useNavigate();
+    const login = useAuthStore((state) => state.login);
+    const [error, setError] = useState<string | null>(null);
+
+    const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<RegisterFormValues>({
+        resolver: zodResolver(registerSchema),
+    });
+
+    const onSubmit = async (data: RegisterFormValues) => {
+        try {
+            setError(null);
+            const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+            // 1. Hit your backend register route
+            await axios.post(`${baseURL}/api/auth/register`, {
+                email: data.email,
+                password: data.password
+            });
+
+            // 2. Immediately log them in using the Zustand action
+            const formData = new URLSearchParams();
+            formData.append('username', data.email);
+            formData.append('password', data.password);
+            await login(formData);
+
+            // 3. Send them to the app
+            navigate('/dashboard', { replace: true });
+        } catch (err: any) {
+            setError(err.response?.data?.detail || "Registration failed. Email may be in use.");
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {error && <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md">{error}</div>}
+            <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input id="email" type="email" {...register('email')} />
+                {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input id="password" type="password" {...register('password')} />
+                {errors.password && <p className="text-xs text-red-500">{errors.password.message}</p>}
+            </div>
+            <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Input id="confirmPassword" type="password" {...register('confirmPassword')} />
+                {errors.confirmPassword && <p className="text-xs text-red-500">{errors.confirmPassword.message}</p>}
+            </div>
+            <Button type="submit" className="w-full mt-4" disabled={isSubmitting}>
+                {isSubmitting ? 'Creating account...' : 'Create account'}
+            </Button>
+            <p className="text-center text-sm text-slate-600">
+                Already have an account? <Link to="/login" className="text-blue-600 hover:underline">Sign in</Link>
+            </p>
+        </form>
+    );
+}
+```
+
+### Task 5.4: The Gatekeeper (`ProtectedRoute.tsx`)
+This is where the `isAuthLoading` state we meticulously set up in the previous step pays off. It prevents the application from abruptly flashing the login screen before the silent refresh check finishes.
+
+```tsx
+// /frontend/src/components/routing/ProtectedRoute.tsx
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuthStore } from '@/store/authStore';
+import { Loader2 } from 'lucide-react'; // Standard shadcn/lucide icon
+
+export default function ProtectedRoute() {
+    const { isAuthenticated, isAuthLoading } = useAuthStore();
+
+    // Show a full-screen loading spinner while checking the HttpOnly cookie
+    if (isAuthLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            </div>
+        );
+    }
+
+    // Redirect to login if the check failed
+    if (!isAuthenticated) {
+        return <Navigate to="/login" replace />;
+    }
+
+    // If authenticated, render the child routes (e.g., Dashboard)
+    return <Outlet />;
+}
+```
+
+### Task 5.5: Wiring it all together (`App.tsx`)
+Finally, we map the components to their URLs and trigger the initial `checkAuth` on app load.
+
+```tsx
+// /frontend/src/App.tsx
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore';
+
+// Layouts & Routes
+import AuthLayout from './components/layout/AuthLayout';
+import LoginForm from './pages/auth/LoginForm';
+import RegisterForm from './pages/auth/RegisterForm';
+import ProtectedRoute from './components/routing/ProtectedRoute';
+
+// Dummy Dashboard (To be built next)
+const Dashboard = () => <div className="p-8 text-2xl font-bold">Welcome to your Dashboard!</div>;
+
+function App() {
+    const checkAuth = useAuthStore((state) => state.checkAuth);
+
+    // Run exactly once when the React app mounts
+    useEffect(() => {
+        checkAuth();
+    }, [checkAuth]);
+
+    return (
+        <BrowserRouter>
+            <Routes>
+                {/* Public Auth Routes */}
+                <Route element={<AuthLayout />}>
+                    <Route path="/login" element={<LoginForm />} />
+                    <Route path="/register" element={<RegisterForm />} />
+                </Route>
+
+                {/* Protected App Routes */}
+                <Route element={<ProtectedRoute />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    {/* Add more protected routes here like /portfolios, /chat */}
+                </Route>
+
+                {/* Catch-all redirect */}
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+        </BrowserRouter>
+    );
+}
+
+export default App;
+```
+
+---
+
+With this, you have a completely secure, end-to-end authentication flow. The backend enforces Row-Level Security, the global state manages the tokens, and React Router seamlessly guards the gates.
+
+Would you like to test this flow by starting the React development server, or should we move directly into building the actual `Dashboard` component to fetch and display the `portfolios` we seeded earlier?
+
+## Prompt 25
+
+Can you fix the following issues:
+
+1. In App.tsx, your catch-all route is: <Route path="*" element={<Navigate to="/dashboard" replace />} />
+If a user is not logged in and visits your site at / (or any random URL), The catch-all redirects them to /dashboard, /dashboard is inside <ProtectedRoute />, ProtectedRoute sees isAuthenticated is false and redirects them to /login. Bug: If they are already on /login, but your AuthLayout or LoginForm has a minor route mismatch, they might get caught in a redirect loop between the catch-all and the protected route. Make your "Home" path (/) explicitly handle the redirection based on auth state, or update your catch-all:
+<Route path="/" element={<Navigate to="/dashboard" replace />} />
+<Route path="*" element={<Navigate to="/login" replace />} />
+
+2. The "Flicker" on Login/Register Pages
+ if an already authenticated user manually goes to /login, your AuthLayout will still show the login form. You should add a check in your AuthLayout or App.tsx to redirect authenticated users away from login/register and back to the dashboard.
+
+3. In ProtectedRoute.tsx, you use:
+const { isAuthenticated, isAuthLoading } = useAuthStore();
+Calling useAuthStore() without a selector (like state => state.isAuthenticated) causes that component to re-render whenever any part of the auth state changes (even if it's just the user object updating). Optimization: Use selectors to prevent unnecessary renders:
+
+You are absolutely spot on with all three of these points. These are the subtle React architecture details that distinguish a functional prototype from a polished, production-ready application.
+
+Here are the fixes applied to your routing and state management to resolve the redirect loops, prevent the auth-page flicker, and optimize React's rendering cycles.
+
+### Fix 1 & 2: Updating `AuthLayout.tsx` for the "Flicker"
+To prevent authenticated users from seeing the login screen, we can turn `AuthLayout` into a "Public Route" guard. Just like `ProtectedRoute` checks for authentication and kicks them out, `AuthLayout` will check for authentication and push them forward to the dashboard.
+
+We also need to include the `isAuthLoading` check here to prevent the UI from briefly rendering the login form while the background cookie check is still running.
+
+```tsx
+// /frontend/src/components/layout/AuthLayout.tsx
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuthStore } from '@/store/authStore';
+import { Loader2 } from 'lucide-react';
+
+export default function AuthLayout() {
+    // Using selectors (Fix 3 applied here as well!)
+    const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+    const isAuthLoading = useAuthStore((state) => state.isAuthLoading);
+
+    // Show a spinner while the initial checkAuth is running
+    if (isAuthLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            </div>
+        );
+    }
+
+    // FIX 2: If they are already logged in, bounce them to the app
+    if (isAuthenticated) {
+        return <Navigate to="/dashboard" replace />;
+    }
+
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+            <div className="w-full max-w-md space-y-8 bg-white p-8 rounded-xl shadow-lg border border-slate-100">
+                <div className="text-center">
+                    <h2 className="mt-6 text-3xl font-extrabold text-slate-900">
+                        Equity Analysis
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Secure your portfolio and chat data
+                    </p>
+                </div>
+                <Outlet />
+            </div>
+        </div>
+    );
+}
+```
+
+### Fix 3: Optimizing Zustand Selectors in `ProtectedRoute.tsx`
+By default, if you don't pass a selector to a Zustand store, the component subscribes to the *entire* state object. If the user object updates (e.g., changing their display name), the `ProtectedRoute` would needlessly re-render.
+
+Here is the optimized version using granular selectors:
+
+```tsx
+// /frontend/src/components/routing/ProtectedRoute.tsx
+import { Navigate, Outlet } from 'react-router-dom';
+import { useAuthStore } from '@/store/authStore';
+import { Loader2 } from 'lucide-react';
+
+export default function ProtectedRoute() {
+    // FIX 3: Granular selectors prevent unnecessary re-renders
+    const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+    const isAuthLoading = useAuthStore((state) => state.isAuthLoading);
+
+    if (isAuthLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            </div>
+        );
+    }
+
+    if (!isAuthenticated) {
+        return <Navigate to="/login" replace />;
+    }
+
+    return <Outlet />;
+}
+```
+
+### Fix 1: Updating the Catch-All Routes in `App.tsx`
+With the guards securely in place, we can explicitly define how the root (`/`) and unknown (`*`) paths behave, eliminating the risk of infinite redirect loops between the two layouts.
+
+```tsx
+// /frontend/src/App.tsx
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore';
+
+import AuthLayout from './components/layout/AuthLayout';
+import LoginForm from './pages/auth/LoginForm';
+import RegisterForm from './pages/auth/RegisterForm';
+import ProtectedRoute from './components/routing/ProtectedRoute';
+
+const Dashboard = () => <div className="p-8 text-2xl font-bold">Welcome to your Dashboard!</div>;
+
+function App() {
+    const checkAuth = useAuthStore((state) => state.checkAuth);
+
+    useEffect(() => {
+        checkAuth();
+    }, [checkAuth]);
+
+    return (
+        <BrowserRouter>
+            <Routes>
+                {/* Public Auth Routes */}
+                <Route element={<AuthLayout />}>
+                    <Route path="/login" element={<LoginForm />} />
+                    <Route path="/register" element={<RegisterForm />} />
+                </Route>
+
+                {/* Protected App Routes */}
+                <Route element={<ProtectedRoute />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                </Route>
+
+                {/* FIX 1: Explicit Root and Catch-All Routing */}
+                {/* Send root traffic into the protected layout (which will redirect to login if needed) */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+                {/* Send 404 traffic to the public layout (which will redirect to dashboard if logged in) */}
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+        </BrowserRouter>
+    );
+}
+
+export default App;
+```
+
+---
+
+With these routing edge cases resolved, your authentication flow is as bulletproof on the frontend as it is on the backend.
+
+Would you like to start building the actual `Dashboard` component now to fetch and display the `portfolios` we seeded into the database earlier?
