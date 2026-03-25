@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -70,20 +71,22 @@ async def register(user_in: UserCreate, response: Response, db: Session = Depend
     return MessageResponse(message="User created successfully")
 
 @router.post("/login", response_model=LoginResponse)
-async def login(user_in: UserLogin, response: Response, db: Session = Depends(get_db)):
+async def login(response: Response,
+                form_data: OAuth2PasswordRequestForm = Depends(),
+                db: Session = Depends(get_db)):
     """Authenticates a user, sets the refresh cookie, and returns an access token."""
 
-    # 1. Fetch the user by email
-    user = db.query(User).filter(User.email == user_in.email).first()
+    # 1. Fetch the user by email (OAuth2 always puts the identifier in the 'username' field)
+    user = db.query(User).filter(User.email == form_data.username).first()
 
     # 2. Timing Attack Mitigation
     is_authenticated = False
     if user:
         # User exists, do the real math
-        is_authenticated = user.verify_password_match(user_in.password)
+        is_authenticated = user.verify_password(form_data.password)
     else:
         # User does NOT exist. Do the fake math to stall the response time.
-        verify_password(user_in.password, DUMMY_HASH)
+        verify_password(form_data.password, DUMMY_HASH)
 
     if not is_authenticated:
         raise HTTPException(
@@ -99,7 +102,7 @@ async def login(user_in: UserLogin, response: Response, db: Session = Depends(ge
     # With this, your database self-heals and gets stronger every time a user logs in.
     try:
         if check_needs_rehash(user.get_password_hash()):
-            user.password = user_in.password
+            user.password = form_data.password
             db.commit()
             db.refresh(user) # Refresh to ensure the object is fully synced
     except SQLAlchemyError:
