@@ -31,10 +31,13 @@ echo "Waiting for test database to accept connections..."
 sleep 3
 
 export TEST_DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5433/stock_analyzer_test"
+export API_USER=postgres
+export ADMIN_USER=postgres
+export DATABASE_URL=$TEST_DATABASE_URL
 
 # Running pytests (success only if all tests pass and coverage is met)
 echo "Running Pytests..."
-pytest backend/ --cov=backend --cov-fail-under=80 -v
+PYTHONPATH=backend pytest backend/ --cov=backend --cov-fail-under=80 -v
 
 if [ $? -eq 0 ]; then
     echo "Pytests passed."
