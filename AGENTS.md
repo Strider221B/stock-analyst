@@ -2,7 +2,11 @@
 
 These principles are **non-negotiable** and must be followed without exception:
 
-### 1.1 Use Project Scripts, Not Direct Tools
+### Follow SOLID Design principles
+
+**IMPORTANT** Ensure code follows SOLID design principles through out.
+
+### Use Project Scripts, Not Direct Tools
 
 Always invoke tools through `./scripts/*` instead of directly.
 
@@ -16,10 +20,8 @@ Always invoke tools through `./scripts/*` instead of directly.
 | Lint code | `ruff check .` | `./scripts/lint.sh` |
 | All checks | *(run each tool)* | `./scripts/check-all.sh` |
 
-See [9.1 Tool Invocation Patterns](#91-tool-invocation-patterns) for complete list.
-
 ---
-### 1.2 No Shortcuts - Fix Root Causes
+### No Shortcuts - Fix Root Causes
 
 Never bypass quality checks or suppress errors without justification.
 
@@ -37,7 +39,7 @@ Never bypass quality checks or suppress errors without justification.
 - ✅ Always run pre-commit checks
 - ✅ Refactor complex functions into smaller ones
 
-### 1.3 Stay Green - Never Request Review with Failing Checks
+### Stay Green - Never Request Review with Failing Checks
 
 Follow the 4-gate workflow rigorously.
 
@@ -52,7 +54,7 @@ Follow the 4-gate workflow rigorously.
 3. Gate 3: Mutation score ≥80%
 4. Gate 4: Code review LGTM
 
-### 1.4 Operate from Project Root
+### Operate from Project Root
 
 Use relative paths from project root. Never `cd` into subdirectories.
 
@@ -65,7 +67,7 @@ Use relative paths from project root. Never `cd` into subdirectories.
 **CI Note**: CI always runs from project root. Commands that use `cd` will break in CI.
 
 ---
-### 1.5 Verify Before Commit
+### Verify Before Commit
 
 Run `./scripts/check-all.sh` before every commit. Only commit if exit code is 0.
 
