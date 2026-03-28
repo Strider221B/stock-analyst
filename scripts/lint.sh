@@ -1,23 +1,15 @@
 #!/bin/bash
 
-# Running pylint (returns success if score greater than 9)
-echo "Running Pylint..."
+# Running ruff (success if all checks pass)
+# C901: complex-structure check
+# --max-complexity 9 means it will fail if complexity >= 10
+echo "Running Ruff..."
+ruff check backend/ --select ALL --extend-ignore=D,ANN,ERA,FIX,TD --max-complexity 9
 
-# Run pylint and get the score
-SCORE=$(pylint backend/ | grep -oP "Your code has been rated at \K[0-9.]+" | head -n 1)
-
-if [ -z "$SCORE" ]; then
-    echo "Pylint failed to run or found no files."
-    exit 1
-fi
-
-echo "Pylint score: $SCORE"
-
-# Check if score is greater than 9
-if (( $(echo "$SCORE > 9" | bc -l) )); then
-    echo "Pylint check passed."
+if [ $? -eq 0 ]; then
+    echo "Ruff checks passed."
     exit 0
 else
-    echo "Pylint score ($SCORE) is less than or equal to 9."
+    echo "Ruff checks failed."
     exit 1
 fi
