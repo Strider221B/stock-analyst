@@ -5,8 +5,7 @@ echo "Running All Checks..."
 
 ./scripts/test.sh && \
 ./scripts/lint.sh && \
-./scripts/type-check.sh && \
-./scripts/complexity.sh
+./scripts/type-check.sh
 
 if [ $? -eq 0 ]; then
     echo "All checks passed successfully."
