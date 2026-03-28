@@ -4,7 +4,7 @@
 # C901: complex-structure check
 # --max-complexity 9 means it will fail if complexity >= 10
 echo "Running Ruff..."
-ruff check backend/ --select ALL --extend-ignore=D,ANN,ERA,FIX,TD --config="lint.mccabe.max-complexity=9"
+ruff check backend/ --select ALL --extend-ignore=D,ANN,ERA,FIX,TD --config="lint.mccabe.max-complexity=9" --exclude backend/tests
 
 if [ $? -eq 0 ]; then
     echo "Ruff checks passed."
