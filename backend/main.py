@@ -7,6 +7,7 @@ from config import settings
 from constants import APITags, AppConfig, CORSConfig, Environment
 from routers.auth import router as auth_router
 from routers.portfolio_routes import router as portfolio_router
+from routers.marketdata_routes import router as marketdata_router
 
 class AppCreator:
     def __init__(self):
@@ -43,6 +44,7 @@ class AppCreator:
     def _configure_routes(self):
         self._app.include_router(auth_router)
         self._app.include_router(portfolio_router)
+        self._app.include_router(marketdata_router)
 
         @self._app.get(f"{AppConfig.API_PREFIX}/health", tags=[APITags.SYSTEM])
         async def health_check():
