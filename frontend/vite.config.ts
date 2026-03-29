@@ -1,3 +1,4 @@
+import path from "path"
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -9,10 +10,19 @@ export default defineConfig({
     tailwindcss(),
     tsconfigPaths()
   ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/tests/setup.ts'],
     globals: true,
+    // Explicitly re-declare alias for vitest to ensure it is picked up in CI
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
   },
   // ---------------------------------------------------------
   // MANUALLY ADDED: Docker Network & HMR Configuration
