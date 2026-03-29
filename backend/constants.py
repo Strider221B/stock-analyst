@@ -14,6 +14,7 @@ class APITags(StrEnum):
     PORTFOLIO = "Portfolios"
     ANALYSIS = "Analysis & Scanning"
     CHAT = "Real-time Chat"
+    MARKETDATA = "Market Data"
 
 # ==========================================
 # Database & Domain Constants
