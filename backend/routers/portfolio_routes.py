@@ -11,11 +11,8 @@ from db_components.models.portfolio_item import PortfolioItem
 from fastapi import APIRouter, Depends, HTTPException, status
 from routers.dependencies import get_current_user
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
-
-if TYPE_CHECKING:
-    from db_components.models.user import User
-    from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload, Session
+from db_components.models.user import User
 
 router = APIRouter(
     prefix="/api/portfolios",
@@ -25,8 +22,8 @@ router = APIRouter(
 @router.post("", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 def create_portfolio(
     portfolio_data: PortfolioCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> MessageResponse:
     new_portfolio = Portfolio(
         user_id=current_user.id,
@@ -36,18 +33,20 @@ def create_portfolio(
     db.add(new_portfolio)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Error creating portfolio",
-        )
+        if e.orig and getattr(e.orig, "pgcode", None) == "23505":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Portfolio already exists",
+            ) from e
+        raise
     return MessageResponse(message="Portfolio created successfully")
 
 @router.get("", response_model=list[PortfolioResponse])
 def get_portfolios(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> list[Portfolio]:
     portfolios = (
         db.query(Portfolio)
@@ -61,8 +60,8 @@ def get_portfolios(
 def add_portfolio_item(
     portfolio_id: uuid.UUID,
     item_data: PortfolioItemCreate,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> MessageResponse:
     portfolio = db.query(Portfolio).filter(
         Portfolio.id == portfolio_id,
@@ -83,12 +82,14 @@ def add_portfolio_item(
     db.add(new_item)
     try:
         db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ticker already exists in portfolio",
-        )
+        if e.orig and getattr(e.orig, "pgcode", None) == "23505":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ticker already exists in portfolio",
+            ) from e
+        raise
 
     return MessageResponse(message="Ticker added successfully")
 
@@ -96,8 +97,8 @@ def add_portfolio_item(
 def remove_portfolio_item(
     portfolio_id: uuid.UUID,
     ticker: str,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[Session, Depends(get_db)],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> MessageResponse:
     item = db.query(PortfolioItem).filter(
         PortfolioItem.portfolio_id == portfolio_id,
