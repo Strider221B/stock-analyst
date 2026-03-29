@@ -24,10 +24,10 @@ interface PortfolioState {
     fetchPortfolios: () => Promise<void>;
     createPortfolio: (name: string, account_type: string) => Promise<void>;
     addTickerToPortfolio: (portfolioId: string, ticker: string) => Promise<void>;
-    removeTicker: (portfolioId: string, itemId: string) => Promise<void>;
+    removeTicker: (portfolioId: string, ticker: string) => Promise<void>;
 }
 
-export const usePortfolioStore = create<PortfolioState>((set) => ({
+export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     portfolios: [],
     isLoading: false,
     error: null,
@@ -48,11 +48,10 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     createPortfolio: async (name: string, account_type: string) => {
         set({ isLoading: true, error: null });
         try {
-            const response = await api.post<Portfolio>('/api/portfolios', { name, account_type });
-            set((state) => ({
-                portfolios: [...state.portfolios, response.data],
-                isLoading: false
-            }));
+            // Backend returns MessageResponse, not the new Portfolio object
+            await api.post('/api/portfolios', { name, account_type });
+            // Refresh the list to get the new portfolio (with its server-side ID)
+            await get().fetchPortfolios();
         } catch (error: any) {
             set({ 
                 error: error.response?.data?.detail || 'Failed to create portfolio', 
@@ -65,19 +64,10 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     addTickerToPortfolio: async (portfolioId: string, ticker: string) => {
         set({ isLoading: true, error: null });
         try {
-            const response = await api.post<PortfolioItem>(`/api/portfolios/${portfolioId}/items`, { ticker });
-            set((state) => ({
-                portfolios: state.portfolios.map(portfolio => {
-                    if (portfolio.id === portfolioId) {
-                        return {
-                            ...portfolio,
-                            items: [...portfolio.items, response.data]
-                        };
-                    }
-                    return portfolio;
-                }),
-                isLoading: false
-            }));
+            // Backend returns MessageResponse, not the new PortfolioItem object
+            await api.post(`/api/portfolios/${portfolioId}/items`, { ticker });
+            // Refresh the list to get the updated portfolio containing the new item
+            await get().fetchPortfolios();
         } catch (error: any) {
             set({ 
                 error: error.response?.data?.detail || 'Failed to add ticker to portfolio', 
@@ -87,16 +77,18 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
         }
     },
 
-    removeTicker: async (portfolioId: string, itemId: string) => {
+    removeTicker: async (portfolioId: string, ticker: string) => {
         set({ isLoading: true, error: null });
         try {
-            await api.delete(`/api/portfolios/${portfolioId}/items/${itemId}`);
+            // Backend expects ticker as path parameter, not itemId (UUID)
+            await api.delete(`/api/portfolios/${portfolioId}/items/${ticker}`);
+            // Optimistic update for deletion (or we could refetch)
             set((state) => ({
                 portfolios: state.portfolios.map(portfolio => {
                     if (portfolio.id === portfolioId) {
                         return {
                             ...portfolio,
-                            items: portfolio.items.filter(item => item.id !== itemId)
+                            items: portfolio.items.filter(item => item.ticker !== ticker.toUpperCase())
                         };
                     }
                     return portfolio;
