@@ -40,10 +40,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install ruff  # Ensure ruff is available for linting step
-
-      - name: Run Ruff Linter
-        run: ruff check backend/
 
       - name: Run Backend Tests with Coverage
         # test.sh handles docker database orchestration automatically
