@@ -1,0 +1,75 @@
+name: CI Execution Suite
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ main ]
+
+jobs:
+  backend:
+    name: Backend Validation (Lint & Test)
+    runs-on: ubuntu-latest
+    
+    # Define required environment variables for BaseSettings validation
+    env:
+      CI: "true"
+      ENVIRONMENT: "test"
+      API_USER: "postgres"
+      API_USER_PASSWORD: "postgres"
+      POSTGRES_DB: "stock_analyzer_test"
+      ADMIN_USER: "postgres"
+      ADMIN_PASSWORD: "postgres"
+      GEMINI_API_KEY: "dummy_value_for_ci_checks"
+      DB_ENCRYPTION_KEY: "79o-SPl-x9aL7d3k_w-0d8mJ-vH1_W2N-m7_u8j3X3Y="
+      JWT_SECRET_KEY: "dummy_jwt_secret_for_ci_checks"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install ruff  # Ensure ruff is available for linting step
+
+      - name: Run Ruff Linter
+        run: ruff check backend/
+
+      - name: Run Backend Tests with Coverage
+        # test.sh handles docker database orchestration automatically
+        run: |
+          chmod +x scripts/test.sh
+          ./scripts/test.sh
+
+  frontend:
+    name: Frontend Validation (Vitest)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Vitest Unit Tests
+        working-directory: frontend
+        run: npm run test
