@@ -15,5 +15,6 @@ pytest
 pytest-asyncio
 pytest-cov
 httpx
-yfinance
-cachetools
+yfinance==1.2.0
+cachetools==5.5.2
+pandas==2.3.1
