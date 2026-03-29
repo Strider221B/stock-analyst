@@ -4,7 +4,7 @@
 echo "Running All Checks..."
 
 ./scripts/test.sh && \
-./scripts/test-frontend.sh && \
+./scripts/test-frontend.sh # && \
 # ./scripts/lint.sh && \
 # ./scripts/type-check.sh
 
