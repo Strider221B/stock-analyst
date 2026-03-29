@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from constants import AccountType
 
 class PortfolioItemCreate(BaseModel):
-    ticker: str = Field(..., max_length=20)
+    ticker: str = Field(..., max_length=20, min_length=1)
 
 class PortfolioItemResponse(BaseModel):
     id: uuid.UUID

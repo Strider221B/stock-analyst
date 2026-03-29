@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from apis.portfolio_schemas import PortfolioCreate, PortfolioItemCreate, PortfolioResponse
 from apis.schemas import MessageResponse
+from constants import APITags
 from db_components.database import get_db
 from db_components.models.portfolio import Portfolio
 from db_components.models.portfolio_item import PortfolioItem
@@ -16,14 +17,14 @@ from db_components.models.user import User
 
 router = APIRouter(
     prefix="/api/portfolios",
-    tags=["Portfolios"],
+    tags=[APITags.PORTFOLIO],
 )
 
 @router.post("", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def create_portfolio(
+async def create_portfolio(
     portfolio_data: PortfolioCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> MessageResponse:
     new_portfolio = Portfolio(
         user_id=current_user.id,
@@ -40,28 +41,36 @@ def create_portfolio(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Portfolio already exists",
             ) from e
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during portfolio creation",
+        ) from e
     return MessageResponse(message="Portfolio created successfully")
 
 @router.get("", response_model=list[PortfolioResponse])
-def get_portfolios(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+async def get_portfolios(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> list[Portfolio]:
     portfolios = (
         db.query(Portfolio)
         .options(joinedload(Portfolio.items))
         .filter(Portfolio.user_id == current_user.id)
+        .order_by(Portfolio.created_at.desc())
         .all()
     )
     return portfolios
 
-@router.post("/{portfolio_id}/items", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def add_portfolio_item(
+@router.post(
+    "/{portfolio_id}/items",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_portfolio_item(
     portfolio_id: uuid.UUID,
     item_data: PortfolioItemCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> MessageResponse:
     portfolio = db.query(Portfolio).filter(
         Portfolio.id == portfolio_id,
@@ -89,16 +98,19 @@ def add_portfolio_item(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Ticker already exists in portfolio",
             ) from e
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error adding portfolio item",
+        ) from e
 
     return MessageResponse(message="Ticker added successfully")
 
 @router.delete("/{portfolio_id}/items/{ticker}", response_model=MessageResponse)
-def remove_portfolio_item(
+async def remove_portfolio_item(
     portfolio_id: uuid.UUID,
     ticker: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> MessageResponse:
     item = db.query(PortfolioItem).filter(
         PortfolioItem.portfolio_id == portfolio_id,
@@ -113,6 +125,13 @@ def remove_portfolio_item(
         )
 
     db.delete(item)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error removing portfolio item",
+        ) from e
 
     return MessageResponse(message="Ticker removed successfully")

@@ -20,7 +20,6 @@ def test_create_portfolio(client, auth_headers):
         "name": "My Tech Stocks",
         "account_type": "DOMESTIC"
     }, headers=auth_headers)
-    print(response.json())
     assert response.status_code == 201
     assert response.json()["message"] == "Portfolio created successfully"
 
@@ -52,7 +51,6 @@ def test_add_portfolio_item(client, auth_headers):
     response = client.post(f"/api/portfolios/{portfolio_id}/items", json={
         "ticker": "AAPL"
     }, headers=auth_headers)
-    print(response.json())
     assert response.status_code == 201
     assert response.json()["message"] == "Ticker added successfully"
     
@@ -121,3 +119,24 @@ def test_remove_portfolio_item_not_found(client, auth_headers):
     
     response = client.delete(f"/api/portfolios/{portfolio_id}/items/NONEXISTENT", headers=auth_headers)
     assert response.status_code == 404
+
+def test_create_portfolio_unauthenticated(client):
+    response = client.post("/api/portfolios", json={
+        "name": "My Tech Stocks",
+        "account_type": "DOMESTIC"
+    })
+    assert response.status_code == 401
+
+def test_get_portfolios_unauthenticated(client):
+    response = client.get("/api/portfolios")
+    assert response.status_code == 401
+
+def test_add_portfolio_item_unauthenticated(client):
+    response = client.post(f"/api/portfolios/{uuid.uuid4()}/items", json={
+        "ticker": "AAPL"
+    })
+    assert response.status_code == 401
+
+def test_remove_portfolio_item_unauthenticated(client):
+    response = client.delete(f"/api/portfolios/{uuid.uuid4()}/items/AAPL")
+    assert response.status_code == 401
