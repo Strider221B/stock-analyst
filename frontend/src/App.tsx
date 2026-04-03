@@ -8,9 +8,8 @@ import AuthLayout from './components/layout/AuthLayout';
 import LoginForm from './pages/auth/LoginForm';
 import RegisterForm from './pages/auth/RegisterForm';
 import ProtectedRoute from './components/routing/ProtectedRoute';
-
-// Dummy Dashboard (To be built next)
-const Dashboard = () => <div className="p-8 text-2xl font-bold">Welcome to your Dashboard!</div>;
+import Dashboard from './pages/Dashboard';
+import { Toaster } from 'sonner';
 
 function App() {
     const checkAuth = useAuthStore((state) => state.checkAuth);
@@ -22,6 +21,7 @@ function App() {
 
     return (
         <BrowserRouter>
+            <Toaster position="top-right" richColors />
             <Routes>
                 {/* Public Auth Routes */}
                 <Route element={<AuthLayout />}>

@@ -11,6 +11,11 @@ export interface User {
     email: string;
 }
 
+export interface LoginCredentials {
+    username: string;
+    password: string;
+}
+
 interface AuthState {
     user: User | null;
     isAuthenticated: boolean;
@@ -20,7 +25,7 @@ interface AuthState {
     setAccessToken: (token: string, user: User) => void;
     clearAuth: () => void;
     checkAuth: () => Promise<void>;
-    login: (credentials: any) => Promise<void>;
+    login: (credentials: LoginCredentials) => Promise<void>;
     logout: () => Promise<void>;
 }
 
@@ -53,7 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 isAuthenticated: true,
                 isAuthLoading: false,
             });
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Check if it's a standard Axios error
             if (axios.isAxiosError(error)) {
                 if (error.response?.status === 401) {
@@ -71,12 +76,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     },
 
     login: async (credentials) => {
-        // Fixed: Use raw axios
+        // We format this as URLSearchParams to match FastAPI's OAuth2PasswordRequestForm
+        // which expects application/x-www-form-urlencoded
+        const formData = new URLSearchParams();
+        formData.append('username', credentials.username);
+        formData.append('password', credentials.password);
+
         const response = await axios.post(
             `${BASE_URL}/api/auth/login`,
-            credentials,
+            formData,
             {
-                // Explicitly tell FastAPI this is form data
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
@@ -88,7 +97,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             accessToken: response.data.access_token,
             user: response.data.user,
             isAuthenticated: true,
-            isAuthLoading: false, // Fixed: Update loading state upon manual login
+            isAuthLoading: false,
         });
     },
 

@@ -50,7 +50,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     },
 
     createPortfolio: async (name: string, account_type: AccountType) => {
-        set({ isLoading: true, error: null });
+        set({ error: null });
         try {
             // Backend returns MessageResponse, not the new Portfolio object
             await api.post('/api/portfolios', { name, account_type });
@@ -61,13 +61,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
             if (axios.isAxiosError(error)) {
                 errorMessage = error.response?.data?.detail || errorMessage;
             }
-            set({ error: errorMessage, isLoading: false });
+            set({ error: errorMessage });
             throw error;
         }
     },
 
     addTickerToPortfolio: async (portfolioId: string, ticker: string) => {
-        set({ isLoading: true, error: null });
+        set({ error: null });
         try {
             // Backend returns MessageResponse, not the new PortfolioItem object
             await api.post(`/api/portfolios/${portfolioId}/items`, { ticker });
@@ -78,13 +78,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
             if (axios.isAxiosError(error)) {
                 errorMessage = error.response?.data?.detail || errorMessage;
             }
-            set({ error: errorMessage, isLoading: false });
+            set({ error: errorMessage });
             throw error;
         }
     },
 
     removeTicker: async (portfolioId: string, ticker: string) => {
-        set({ isLoading: true, error: null });
+        set({ error: null });
         try {
             // Backend expects ticker as path parameter, not itemId (UUID)
             await api.delete(`/api/portfolios/${portfolioId}/items/${ticker}`);
@@ -95,7 +95,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
             if (axios.isAxiosError(error)) {
                 errorMessage = error.response?.data?.detail || errorMessage;
             }
-            set({ error: errorMessage, isLoading: false });
+            set({ error: errorMessage });
             throw error;
         }
     }

@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuthStore } from '@/store/authStore';
+import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,28 +29,22 @@ export default function LoginForm() {
     const onSubmit = async (data: LoginFormValues) => {
         try {
             setError(null);
-            // We format this as URLSearchParams to match FastAPI's OAuth2PasswordRequestForm
-            const formData = new URLSearchParams();
-            formData.append('username', data.email);
-            formData.append('password', data.password);
-
-            await login(formData);
+            await login({ username: data.email, password: data.password });
             navigate('/dashboard', { replace: true });
-        } catch (err: any) {
-            const detail = err.response?.data?.detail;
-
-            // 1. If FastAPI sends a standard string error message (like 400 Bad Request)
-            if (typeof detail === 'string') {
-                setError(detail);
-            }
-            // 2. If FastAPI sends a Pydantic Validation Error array (422 Unprocessable Entity)
-            else if (Array.isArray(detail)) {
-                // Extracts just the readable messages and joins them with a comma
-                const messages = detail.map((e: any) => `${e.loc[e.loc.length - 1]}: ${e.msg}`);
-                setError(messages.join(', '));
-            }
-            // 3. Fallback for network crashes
-            else {
+        } catch (error: unknown) {
+            if (axios.isAxiosError(error)) {
+                const detail = error.response?.data?.detail;
+                if (typeof detail === 'string') {
+                    setError(detail);
+                } else if (Array.isArray(detail)) {
+                    const messages = detail.map((e: { loc: string[]; msg: string }) =>
+                        `${e.loc[e.loc.length - 1]}: ${e.msg}`
+                    );
+                    setError(messages.join(', '));
+                } else {
+                    setError("Invalid credentials. Please try again.");
+                }
+            } else {
                 setError("An unexpected error occurred. Please try again.");
             }
         }

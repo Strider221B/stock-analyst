@@ -21,9 +21,9 @@ api.interceptors.request.use(
 
 // --- Concurrency / Queue Management Variables ---
 let isRefreshing = false;
-let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: any) => void }> = [];
+let failedQueue: Array<{ resolve: (token: string) => void; reject: (error: unknown) => void }> = [];
 
-const processQueue = (error: any, token: string | null = null) => {
+const processQueue = (error: unknown, token: string | null = null) => {
     failedQueue.forEach(prom => {
         if (error) prom.reject(error);
         else if (token) prom.resolve(token);
