@@ -69,6 +69,6 @@ def set_tenant_context(dbapi_connection, connection_record, connection_proxy):
 
         else:
             # If no user is logged in, explicitly clear the setting so Postgres defaults to denying access.
-            cursor.execute("SELECT set_config('app.current_user_id', '', true);")
+            cursor.execute("SELECT set_config('app.current_user_id', '00000000-0000-0000-0000-000000000000', true);")
     finally:
         cursor.close()
