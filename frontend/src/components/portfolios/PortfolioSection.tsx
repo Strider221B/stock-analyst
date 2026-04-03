@@ -1,13 +1,5 @@
 // /frontend/src/components/portfolios/PortfolioSection.tsx
-import { 
-    Card, 
-    CardHeader, 
-    CardTitle, 
-    CardContent, 
-    CardDescription 
-} from "../ui/card";
-import { Button } from "../ui/button";
-import { Plus, Trash2, LineChart } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { Portfolio } from "../../store/portfolioStore";
 import { usePortfolioStore } from "../../store/portfolioStore";
 import { 
@@ -21,7 +13,9 @@ import {
     AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { AddTickerModal } from "./AddTickerModal";
+import { StockCard } from "./StockCard";
 import { useState } from "react";
 import { formatAccountType } from "../../lib/utils";
 import { toast } from "sonner";
@@ -29,52 +23,6 @@ import { toast } from "sonner";
 
 interface PortfolioSectionProps {
     portfolio: Portfolio;
-}
-
-interface TickerCardProps {
-    item: Portfolio["items"][0];
-    portfolioName: string;
-    onRemove: (ticker: string) => void;
-}
-
-function TickerCard({ item, portfolioName, onRemove }: TickerCardProps) {
-    return (
-        <Card className="group relative transition-all hover:shadow-lg hover:border-primary/20">
-            <CardHeader className="pb-3">
-                <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                        <CardTitle className="text-xl font-bold tracking-tight">{item.ticker}</CardTitle>
-                        <CardDescription className="text-xs">Added on {new Date(item.added_at).toLocaleDateString()}</CardDescription>
-                    </div>
-                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            aria-label={`Remove ${item.ticker} from ${portfolioName}`}
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => onRemove(item.ticker)}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div className="flex justify-between items-end">
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="w-full gap-2 text-xs font-bold py-1 h-8 opacity-50 cursor-not-allowed"
-                        disabled
-                        title="Coming soon"
-                    >
-                        <LineChart className="h-3 w-3" />
-                        Analyze Stock
-                    </Button>
-                </div>
-            </CardContent>
-        </Card>
-    );
 }
 
 export function PortfolioSection({ portfolio }: PortfolioSectionProps) {
@@ -87,6 +35,7 @@ export function PortfolioSection({ portfolio }: PortfolioSectionProps) {
         try {
             await removeTicker(portfolio.id, tickerToRemove);
             setTickerToRemove(null);
+            toast.success(`Removed ${tickerToRemove} from ${portfolio.name}`);
         } catch (error) {
             console.error("Failed to remove ticker:", error);
             toast.error("Failed to remove ticker. Please try again.");
@@ -119,11 +68,14 @@ export function PortfolioSection({ portfolio }: PortfolioSectionProps) {
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {portfolio.items.map((item) => (
-                        <TickerCard 
+                        <StockCard 
                             key={`${portfolio.id}-${item.ticker}`}
-                            item={item}
+                            ticker={item.ticker}
                             portfolioName={portfolio.name}
-                            onRemove={setTickerToRemove}
+                            addedAt={item.added_at}
+                            // We can still trigger removeTicker from StockCard
+                            // but for confirmation UI we'll use a hack or just pass a callback
+                            onRemove={() => setTickerToRemove(item.ticker)}
                         />
                     ))}
                 </div>

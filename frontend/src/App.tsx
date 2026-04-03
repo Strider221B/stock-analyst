@@ -9,6 +9,7 @@ import LoginForm from './pages/auth/LoginForm';
 import RegisterForm from './pages/auth/RegisterForm';
 import ProtectedRoute from './components/routing/ProtectedRoute';
 import Dashboard from './pages/Dashboard';
+import Analyze from './pages/Analyze';
 import { Toaster } from 'sonner';
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
                 {/* Protected App Routes */}
                 <Route element={<ProtectedRoute />}>
                     <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/analyze/:ticker" element={<Analyze />} />
                     {/* Add more protected routes here like /portfolios, /chat */}
                 </Route>
 

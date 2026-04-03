@@ -10,6 +10,16 @@ export interface PortfolioItem {
     added_at: string;
 }
 
+/** 
+ * Represents a single day of historical price data.
+ */
+export interface PricePoint {
+    /** ISO 8601 formatted date string (YYYY-MM-DD) */
+    date: string;
+    /** Closing price for the given date */
+    price: number;
+}
+
 export interface Portfolio {
     id: string;
     name: string;
@@ -28,6 +38,8 @@ interface PortfolioState {
     createPortfolio: (name: string, account_type: AccountType) => Promise<void>;
     addTickerToPortfolio: (portfolioId: string, ticker: string) => Promise<void>;
     removeTicker: (portfolioId: string, ticker: string) => Promise<void>;
+    priceHistory: Record<string, PricePoint[]>;
+    fetchPriceHistory: (ticker: string) => Promise<boolean>;
 }
 
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
@@ -35,6 +47,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     isLoading: false,
     error: null,
 
+    /**
+     * Fetches all portfolios for the current user.
+     */
     fetchPortfolios: async () => {
         set({ isLoading: true, error: null });
         try {
@@ -49,6 +64,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
         }
     },
 
+    /**
+     * Creates a new portfolio.
+     */
     createPortfolio: async (name: string, account_type: AccountType) => {
         set({ error: null });
         try {
@@ -66,6 +84,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
         }
     },
 
+    /**
+     * Adds a stock ticker to a specific portfolio.
+     */
     addTickerToPortfolio: async (portfolioId: string, ticker: string) => {
         set({ error: null });
         try {
@@ -83,6 +104,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
         }
     },
 
+    /**
+     * Removes a stock ticker from a portfolio.
+     */
     removeTicker: async (portfolioId: string, ticker: string) => {
         set({ error: null });
         try {
@@ -97,6 +121,31 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
             }
             set({ error: errorMessage });
             throw error;
+        }
+    },
+
+    priceHistory: {},
+    /**
+     * Fetches and caches historical price data for a ticker.
+     * @returns boolean indicating success or failure.
+     */
+    fetchPriceHistory: async (ticker: string): Promise<boolean> => {
+        // Return true if already in cache
+        if (get().priceHistory[ticker]) return true;
+
+        try {
+            const response = await api.get<PricePoint[]>(`/api/marketdata/${ticker}/history`);
+            set((state) => ({
+                priceHistory: {
+                    ...state.priceHistory,
+                    [ticker]: response.data
+                }
+            }));
+            return true;
+        } catch (error: unknown) {
+            console.error(`Failed to fetch history for ${ticker}:`, error);
+            // Don't set global error here to avoid blocking UI; component handles its own error
+            return false;
         }
     }
 }));

@@ -49,10 +49,7 @@ export default function RegisterForm() {
             });
 
             // 2. Immediately log them in using the Zustand action
-            const formData = new URLSearchParams();
-            formData.append('username', data.email);
-            formData.append('password', data.password);
-            await login(formData);
+            await login({ username: data.email, password: data.password });
 
             // 3. Send them to the app
             navigate('/dashboard', { replace: true });
