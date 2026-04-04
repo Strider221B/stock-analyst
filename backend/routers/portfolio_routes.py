@@ -36,7 +36,8 @@ async def create_portfolio(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        if e.orig and getattr(e.orig, "pgcode", None) == "23505":
+        # psycopg2 uses pgcode, psycopg3 uses sqlstate
+        if e.orig and getattr(e.orig, "pgcode", getattr(e.orig, "sqlstate", None)) == "23505":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Portfolio already exists",
@@ -93,7 +94,8 @@ async def add_portfolio_item(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        if e.orig and getattr(e.orig, "pgcode", None) == "23505":
+        # psycopg2 uses pgcode, psycopg3 uses sqlstate
+        if e.orig and getattr(e.orig, "pgcode", getattr(e.orig, "sqlstate", None)) == "23505":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Ticker already exists in portfolio",
