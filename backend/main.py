@@ -1,5 +1,6 @@
 # /backend/main.py
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +10,23 @@ from routers.auth import router as auth_router
 from routers.portfolio_routes import router as portfolio_router
 from routers.marketdata_routes import router as marketdata_router
 
+# Import the factory function we built for the agent
+from workflows.stock_analysis_graph import create_stock_agent
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifecycle manager for the FastAPI application.
+    Code before the yield runs on server startup.
+    Code after the yield runs on server shutdown.
+    """
+    # Compile the LangGraph agent exactly once and attach it to the app state
+    app.state.stock_agent = create_stock_agent()
+
+    yield
+
+    # Teardown logic goes here (e.g., closing manual connection pools if needed)
+
 class AppCreator:
     def __init__(self):
         self._app = FastAPI(
@@ -17,6 +35,8 @@ class AppCreator:
             version=AppConfig.VERSION,
             # Disable Swagger docs in production dynamically
             docs_url="/docs" if settings.environment == Environment.DEVELOPMENT else None,
+            # Attach the lifespan manager here!
+            lifespan=lifespan,
         )
         self._configure_cors()
         self._configure_routes()
