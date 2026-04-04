@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from constants import APITags, AppConfig, CORSConfig, Environment
+from psycopg_pool import AsyncConnectionPool
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from routers.auth import router as auth_router
 from routers.portfolio_routes import router as portfolio_router
 from routers.marketdata_routes import router as marketdata_router
@@ -15,17 +17,40 @@ from workflows.stock_analysis_graph import create_stock_agent
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifecycle manager for the FastAPI application.
-    Code before the yield runs on server startup.
-    Code after the yield runs on server shutdown.
-    """
-    # Compile the LangGraph agent exactly once and attach it to the app state
-    app.state.stock_agent = create_stock_agent()
+    """Lifecycle manager for the FastAPI application."""
 
-    yield
+    # --- PHASE 1: DDL SETUP (Admin Privileges) ---
+    # Use the admin URL to create the LangGraph tables.
+    # Note: Ensure 'admin_database_url' is defined in your config.py Settings class!
+    admin_dsn = settings.get_admin_database_url().replace("+psycopg2", "").replace("+psycopg", "")
 
-    # Teardown logic goes here (e.g., closing manual connection pools if needed)
+    # We only need this pool for a split second, so max_size=2 is plenty
+    async with AsyncConnectionPool(conninfo=admin_dsn,
+                                   min_size=1,
+                                   max_size=2,
+                                   kwargs={"autocommit": True, "prepare_threshold": 0}) as admin_pool:
+        setup_checkpointer = AsyncPostgresSaver(admin_pool)
+        # This creates the tables using the admin role
+        await setup_checkpointer.setup()
+
+    # admin_pool automatically closes here. Schema is now ready!
+
+    # --- PHASE 2: RUNTIME (Restricted API Privileges) ---
+    # Now we switch to the safe API user for everyday operation
+    api_dsn = settings.get_database_url().replace("+psycopg2", "").replace("+psycopg", "")
+
+    async with AsyncConnectionPool(conninfo=api_dsn,
+                                   min_size=1,
+                                   max_size=settings.pool_size,
+                                   kwargs={"autocommit": True, "prepare_threshold": 0}) as pool:
+        # Pass the restricted pool into the checkpointer
+        runtime_checkpointer = AsyncPostgresSaver(pool)
+
+        # Compile the agent and attach it to the app state
+        app.state.stock_agent = create_stock_agent(checkpointer=runtime_checkpointer)
+
+        # Yield control back to FastAPI. The API pool stays open while the server runs.
+        yield
 
 class AppCreator:
     def __init__(self):

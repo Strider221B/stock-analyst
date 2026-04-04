@@ -33,8 +33,8 @@ services:
       # KEPT FOR DEV ONLY: Allows you to view Swagger UI at localhost:8000/docs
       - "${BACKEND_PORT:-8000}:8000"
     environment:
-      - ADMIN_DATABASE_URL=postgresql://${ADMIN_USER}:${ADMIN_PASSWORD}@db:5432/${POSTGRES_DB}
-      - DATABASE_URL=postgresql://${API_USER}:${API_USER_PASSWORD}@db:5432/${POSTGRES_DB}
+      - ADMIN_DATABASE_URL=postgresql+psycopg://${ADMIN_USER}:${ADMIN_PASSWORD}@db:5432/${POSTGRES_DB}
+      - DATABASE_URL=postgresql+psycopg://${API_USER}:${API_USER_PASSWORD}@db:5432/${POSTGRES_DB}
       - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
