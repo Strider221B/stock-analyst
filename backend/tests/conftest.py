@@ -11,7 +11,7 @@ from db_components.models import Base
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5433/stock_analyzer_test"
+    "postgresql+psycopg://postgres:postgres@localhost:5433/stock_analyzer_test"
 )
 
 engine = create_engine(TEST_DATABASE_URL)

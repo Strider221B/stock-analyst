@@ -1,14 +1,14 @@
+# /backend/tools/news_scraper.py
 import json
 import asyncio
 import random
 import logging
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_async
+from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
 
 async def scrape_yahoo_finance_news(ticker: str, max_retries: int = 3) -> str:
-    # FIXED: Correct Yahoo Finance URL structure
     url = f"https://finance.yahoo.com/quote/{ticker}"
 
     async with async_playwright() as p:
@@ -23,11 +23,13 @@ async def scrape_yahoo_finance_news(ticker: str, max_retries: int = 3) -> str:
                 geolocation={"longitude": -74.0060, "latitude": 40.7128},
                 permissions=["geolocation"]
             )
+
+            # THE FIX: Use the new class-based API and apply stealth to the entire context
+            await Stealth().apply_stealth_async(context)
+
             page = await context.new_page()
-            await stealth_async(page)
 
             try:
-                # FIXED: Restored 'networkidle' to allow React to hydrate the news feed
                 response = await page.goto(url, wait_until="networkidle", timeout=25000)
 
                 # Check for 403 or other failures immediately

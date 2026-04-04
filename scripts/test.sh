@@ -30,7 +30,7 @@ trap cleanup EXIT
 echo "Waiting for test database to accept connections..."
 sleep 3
 
-export TEST_DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5433/stock_analyzer_test"
+export TEST_DATABASE_URL="postgresql+psycopg://postgres:postgres@localhost:5433/stock_analyzer_test"
 export API_USER=postgres
 export ADMIN_USER=postgres
 export DATABASE_URL=$TEST_DATABASE_URL
