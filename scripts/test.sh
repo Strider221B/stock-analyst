@@ -6,7 +6,7 @@ set -e
 # Run conditionally if we are not in CI
 if [ "$CI" != "true" ]; then
     echo "Activating Python environment..."
-    source ~/PythonEnvs/P3.12_LLM/bin/activate
+    source ~/python_envs/p3_13_llm/bin/activate
 fi
 
 # Spin up a temporary postgres container for testing
