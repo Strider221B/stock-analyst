@@ -5,7 +5,7 @@ from typing import Annotated
 
 from apis.portfolio_schemas import PortfolioCreate, PortfolioItemCreate, PortfolioResponse
 from apis.schemas import MessageResponse
-from constants import APITags
+from constants import APITags, AccountType
 from db_components.database import get_db
 from db_components.models.portfolio import Portfolio
 from db_components.models.portfolio_item import PortfolioItem
@@ -19,6 +19,8 @@ router = APIRouter(
     prefix="/api/portfolios",
     tags=[APITags.PORTFOLIO],
 )
+
+_NSE_EXTENSION = '.NS'
 
 @router.post("", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def create_portfolio(
@@ -67,6 +69,7 @@ async def get_portfolios(
     response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
 )
+
 async def add_portfolio_item(
     portfolio_id: uuid.UUID,
     item_data: PortfolioItemCreate,
@@ -84,10 +87,21 @@ async def add_portfolio_item(
             detail="Portfolio not found",
         )
 
+    # --- AUTO-TAGGING LOGIC ---
+    ticker_to_save = item_data.ticker.upper().strip()
+
+    # Safely extract the string value whether account_type is a SQLAlchemy Enum or a raw String
+    account_type_str = getattr(portfolio.account_type, "value", portfolio.account_type)
+
+    # Automatically append .NS for domestic Indian equities if not already provided
+    if account_type_str == AccountType.DOMESTIC and "." not in ticker_to_save:
+        ticker_to_save = f"{ticker_to_save}{_NSE_EXTENSION}"
+    # --------------------------
+
     new_item = PortfolioItem(
         user_id=current_user.id,
         portfolio_id=portfolio.id,
-        ticker=item_data.ticker.upper(),
+        ticker=ticker_to_save,  # Use the safely formatted ticker here
     )
     db.add(new_item)
     try:
@@ -105,7 +119,7 @@ async def add_portfolio_item(
             detail="Internal server error adding portfolio item",
         ) from e
 
-    return MessageResponse(message="Ticker added successfully")
+    return MessageResponse(message=f"Ticker {ticker_to_save} added successfully")
 
 @router.delete("/{portfolio_id}/items/{ticker}", response_model=MessageResponse)
 async def remove_portfolio_item(
